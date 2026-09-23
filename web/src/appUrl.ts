@@ -1,16 +1,18 @@
 /**
  * Where the real application lives.
  *
- * This site is the public one: what ResearchAgentLab is, what it costs, and
- * where the source is. The application itself is a different thing on a
- * different machine -- it runs research for hours, holds open websockets and
- * writes to a disk -- so it is not part of this build and is linked to instead.
+ * The public build deliberately does not link to the research application.
+ * This helper remains for a future separately reviewed deployment only.
  *
- * Set VITE_APP_URL at build time. The default is the local server, so running
- * this site on a laptop points at the copy running on that laptop.
+ * A production build must never silently fall back to a visitor's localhost.
  */
-export const APP_URL: string =
-  (import.meta.env.VITE_APP_URL as string | undefined) || 'http://localhost:8000';
+const configuredAppUrl = (import.meta.env.VITE_APP_URL as string | undefined)?.trim();
+
+if (import.meta.env.PROD && !configuredAppUrl) {
+  throw new Error('VITE_APP_URL must be set before linking a production build to the research application.');
+}
+
+export const APP_URL: string = configuredAppUrl || 'http://localhost:8000';
 
 /** A path inside the application, as an absolute URL. */
 export function appLink(path = ''): string {

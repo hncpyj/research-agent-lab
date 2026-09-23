@@ -1,7 +1,15 @@
 {
-  "description": "The Research Agent Lab webpage facilitates collaboration and resource sharing for researchers, enhancing productivity and streamlining project management.",
+  "title": "ResearchAgentLab — Protocol Before Code",
+  "description": "A source-available autonomous research system that keeps approved scientific intent traceable from protocol to results.",
+  "language": "en",
   "robots": {
-    "index": false
+    "index": true
+  },
+  "icons": {
+    "icon": "/favicon.svg"
+  },
+  "openGraph": {
+    "image": "/og-image.svg"
   },
   "accessibility": {
     "addBypassLinks": false,

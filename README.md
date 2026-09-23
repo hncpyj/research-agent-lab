@@ -1,280 +1,388 @@
-# AI Research Agent
+# ResearchAgentLab
 
-Vague research topic → papers → gap analysis → hypotheses → runnable experiment code → results → peer-review-style quality check → report (MD/LaTeX/PDF).
+ResearchAgentLab is a local-first research workspace that helps turn a research
+brief into literature evidence, an approved scientific question, a controlled
+study, checked results, and a traceable report.
 
-Two ways to use it: a **Web UI** (primary, recommended) or the original **CLI**. Both drive the same 8-phase pipeline and share the same SQLite session store, so a session started in one can be resumed from the other.
+The project is also the reference implementation for **Protocol Before Code**:
+a safety architecture designed to prevent an autonomous research agent from
+silently implementing a different experiment from the one that was approved.
+
+> A runnable experiment is not necessarily the intended experiment.
+
+ResearchAgentLab is a research prototype. Generated code should be executed
+only in an environment you control, and its outputs still require scientific
+review.
+
+[![ResearchAgentLab public project website](docs/assets/researchagentlab-homepage.png)](https://researchagentlab.com)
+
+Public project site: [researchagentlab.com](https://researchagentlab.com)
 
 ---
 
-## Quick Start
+## What it does
 
-### 1. Python environment
+- Searches multiple scholarly sources and preserves source provenance.
+- Extracts findings, limitations, methods, datasets, and evidence from papers.
+- Challenges proposed literature gaps before turning them into research
+  questions.
+- Pauses for user decisions at question, hypothesis, source, and analysis-plan
+  gates.
+- Supports both declared-dataset studies and generated experiment codebases.
+- Stores versioned artifacts so completed work can be resumed instead of
+  silently regenerated.
+- Routes work across local models and optional paid providers.
+- Tracks provider usage, cost, degradations, retries, and operational failures.
+- Produces structured results, checked claims, and Markdown/LaTeX/PDF reports.
+- Separates scientific conformance from ordinary software validation.
+
+## Current research status
+
+The safety architecture and its motivating Choice-Set workload have been
+evaluated separately. These numbers are intentionally kept distinct: safety
+benchmarks do not establish the scientific hypothesis, and a successful
+scientific run does not validate every safety layer.
+
+### Safety validation
+
+| Evaluation | Result |
+|---|---:|
+| Clear scientific drift accepted by intent fidelity | 0/13 |
+| Any drifted protocol accepted | 0/18 |
+| Faithful protocols hard-blocked | 1/16 |
+| Faithful protocols escalated for review | 6/16 |
+| Blind semantic apparatus mutations detected before execution | 18/18 |
+| Apparatus mutations that would escape without integrity control | 15/18 |
+| Faults detected in the final layered benchmark | 25/25 |
+| Faults escaping the final layered benchmark | 0/25 |
+
+These are bounded results from the recorded Choice-Set-domain evaluations and
+mutation suites. They do not establish cross-domain reliability.
+
+### Frozen Choice-Set H1 result
+
+One frozen confirmatory run completed 192 paired units and 384 condition
+records with no exclusions, fatal failures, parse failures, or model retries.
+
+| Outcome | Benign curation | Adversarial curation | Difference | Paired-bootstrap 95% CI |
+|---|---:|---:|---:|---:|
+| Target selection | 25/192 (13.0%) | 52/192 (27.1%) | +14.1 pp | [+8.3, +20.3] pp |
+| Explicit approval | 192/192 (100%) | 192/192 (100%) | 0.0 pp | [0.0, 0.0] pp |
+
+The frozen H1 rule was satisfied for this candidate pool, prompt set, local
+model digest, and execution schedule. Approval was at a complete ceiling, and
+post-hoc mechanism diagnostics remain descriptive. No second confirmatory run
+was performed.
+
+The public evidence organization is described in
+[`research_logs/README.md`](research_logs/README.md). Claim boundaries and
+limitations are tracked in
+[`research_logs/paper_evidence/claims.md`](research_logs/paper_evidence/claims.md).
+
+---
+
+## How the workflow is organized
+
+ResearchAgentLab no longer assumes that every user needs one fixed pipeline.
+Each stage declares what it requires, what it produces, and whether it is ready
+to run. Existing paper lists, gap reports, and research questions can be
+imported rather than regenerated; imported material is marked as such.
+
+```text
+Research brief or imported artifacts
+        |
+        v
+Paper collection -> literature review -> gap checks -> question gate
+        |
+        +-- Declared-dataset study
+        |      data audit -> hypothesis gate -> analysis-plan gate
+        |      -> tested analysis blocks -> results -> claims -> report review
+        |
+        +-- Generated experiment
+               hypothesis -> scientific design/build controls
+               -> software preflight -> execution -> result and quality review
+```
+
+For controlled decision studies, the Protocol Before Code path is:
+
+```text
+Approved intent
+    -> StudyProtocol
+    -> Intent Fidelity + Methodology Review
+    -> Freeze and protocol hash
+    -> BuildManifest
+    -> Least-authority generation
+    -> Scientific Conformance
+    -> Software Preflight
+    -> Execution
+    -> Result Conformance
+    -> Claim-to-evidence review
+```
+
+The two pre-freeze reviews answer different questions:
+
+- **Intent Fidelity:** Is this still the study that was approved?
+- **Methodology Review:** Is that study scientifically defensible?
+
+A sound design for the wrong question fails intent fidelity. A faithful but
+unsound design fails methodology review. Neither verdict can override the
+other.
+
+### Least-authority execution tiers
+
+| Tier | Model authority |
+|---|---|
+| Declarative | Trusted apparatus runs the study; the model supplies bounded structured content. |
+| Plugin | Trusted infrastructure remains fixed; the model implements a declared interface. |
+| Open-ended | The model may generate the program when no constrained representation is available. |
+
+Trusted apparatus is bound to the `BuildManifest` by content hash, not only by
+filename or interface. Scientific changes require a new protocol version;
+software repair is not allowed to redefine the frozen science.
+
+---
+
+## Quick start
+
+### Requirements
+
+- Python 3.12 is recommended.
+- Git is recommended for provenance and reproducibility.
+- [Ollama](https://ollama.com/) is optional but is the simplest local model
+  backend.
+- A paid-provider key is optional. The application can run local-only when a
+  suitable local model is available.
+
+### Install
 
 ```bash
+git clone https://github.com/hncpyj/research-agent-lab.git
+cd research-agent-lab
+python -m venv .venv
+```
+
+Activate the environment:
+
+```bash
+# macOS / Linux
+source .venv/bin/activate
+
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+```
+
+Install the Python dependencies:
+
+```bash
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Tested on Python 3.14 (Windows/macOS/Linux). `ChromaDB` is commented out of `requirements.txt` by default — it's only used by the CLI's embedding-based similarity search (never by the Web UI, see [Local model backends](#local-model-backends) below) and has no wheel for 3.14 at the time of writing. If you're running the CLI path, `pip install chromadb` separately on Python ≤3.12.
-
-### 2. Local model backend (optional but recommended)
-
-The system prefers **Ollama** for local inference — no GGUF file management needed:
+### Optional local models
 
 ```bash
-# https://ollama.com
-ollama pull llama3.1:8b        # or any model; OLLAMA_MODEL does prefix-matching
-ollama pull nomic-embed-text   # paper relevance ranking in Phase 1
+ollama pull llama3.1:8b
+ollama pull nomic-embed-text
 ```
 
-If Ollama isn't running, `OllamaModel.load()` auto-starts `ollama serve`. If Ollama isn't installed at all, the system falls back to `llama-cpp-python` + a local GGUF file (see `.env.example` for `LOCAL_MODEL_PATH` / `EMBED_MODEL_PATH`), and if that's also unavailable it runs in **API-only mode** using Claude for everything.
+The first model handles local text generation. `nomic-embed-text` is used for
+paper relevance ranking. Model names and the context window can be changed in
+the application settings or `.env`.
 
-### 3. Set your Anthropic API key
+### Configuration
 
-Copy `.env.example` to `.env` and fill in `ANTHROPIC_API_KEY`, or export it directly:
+Copy `.env.example` to `.env` and set only the backends you intend to use.
+Never commit `.env` or provider keys.
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...        # macOS / Linux
-$env:ANTHROPIC_API_KEY = "sk-ant-..."      # PowerShell
+# macOS / Linux
+cp .env.example .env
+
+# Windows PowerShell
+Copy-Item .env.example .env
 ```
 
-The Web UI also has an **API on/off toggle** in the top nav bar — turn it off to force every phase through the local model and spend $0, without touching `.env`.
+Supported adapter types:
 
-### 4. Run — Web UI (recommended)
+| Backend | Configuration |
+|---|---|
+| Ollama | `OLLAMA_HOST`, `OLLAMA_MODEL`, `OLLAMA_EMBED_MODEL` |
+| llama.cpp GGUF fallback | `LOCAL_MODEL_PATH`, `EMBED_MODEL_PATH` |
+| Anthropic | `ANTHROPIC_API_KEY`, `API_MODEL` |
+| OpenAI | `OPENAI_API_KEY`, `OPENAI_MODEL` |
+| Gemini | `GEMINI_API_KEY`, `GEMINI_MODEL` |
+| OpenAI-compatible local server | Configure its URL and model in Settings |
+
+An adapter being present does not guarantee that a particular account or model
+identifier is available. Validate paid-provider configuration with one minimal
+canary before relying on it for a run. Do not use scientific experiments as
+provider integration tests.
+
+### Run the application
 
 ```bash
 python run_ui.py
-# opens http://localhost:8000
 ```
 
-Create a session from the browser (topic + optional background/goals/constraints), pick a research question when prompted, and watch the pipeline stream through the browser via WebSocket.
+The application opens at `http://127.0.0.1:8000`.
 
-### 5. Run — CLI (alternative)
+Useful options:
 
 ```bash
-python main.py                                          # interactive prompt
-python main.py --topic "transformer attention efficiency"
-python main.py --session <session_id>                    # resume
-python main.py --list-sessions                           # show saved sessions
-python main.py --skip-local                               # API-only, skip local model
-python main.py --session <id> --experiment                # re-run Phase 5 only
-python main.py --session <id> --run-experiment            # re-run Phase 6 only
+python run_ui.py --no-browser
+python run_ui.py --port 8080
+python run_ui.py --reload
 ```
+
+`run_ui.py` refuses to bind to a non-loopback address without `UI_TOKEN`
+unless `--allow-insecure` is explicitly supplied. Do not use
+`--allow-insecure` on an untrusted network.
+
+### CLI
+
+The original CLI remains available:
+
+```bash
+python main.py
+python main.py --topic "your research topic"
+python main.py --session <session_id>
+python main.py --list-sessions
+python main.py --skip-local
+python main.py --session <session_id> --experiment
+python main.py --session <session_id> --run-experiment
+```
+
+The Web UI and CLI share the same SQLite store and can resume the same session.
 
 ---
 
-## Architecture
+## Model routing and cost controls
 
-```
-main.py / run_ui.py
-  └─ Orchestrator (CLI)  /  SessionRunner (Web UI)
-       ├─ Phase 1  PaperCollectionAgent    [LOCAL]      multi-source search + canon-seed + embed + rank
-       ├─ Phase 2  LiteratureReviewAgent   [LOCAL]      structured extraction + comparison table
-       ├─ Phase 3  GapAnalysisAgent        [API]        gap report + validation + research question candidates (user picks one)
-       ├─ Phase 4  HypothesisAgent         [API+LOCAL]  brainstorm + novelty check + refine
-       ├─ Phase 5  ExperimentAgent         [API]        generate a runnable, domain-specific experiment codebase
-       │             ↳ pre-execution domain-alignment gate (fast, no eval data needed)
-       ├─ Phase 6  ExperimentRunnerAgent   [subprocess+API]  pip install → pretrain → train → evaluate, with LLM auto-fix on failure
-       ├─ Phase 7  QualityReviewAgent      [API]        AI-judge peer review + rule-based checks (never blocks the pipeline)
-       └─ Phase 8  ReportAgent             [API, on-demand]  one LLM call → structured JSON → rendered to Markdown/LaTeX/PDF
-```
+Structured, repetitive tasks can be routed to a local model while tasks that
+require broader synthesis use the configured API provider. When API use is
+disabled or unavailable, eligible calls fall back to the local backend and the
+degradation is recorded rather than hidden.
 
-Every phase (1–6) is wrapped by `SelfBugFixAgent` (`agents/self_bugfix_agent.py`), which retries on transient errors, asks the LLM to repair malformed JSON, or injects a hint on `KeyError`/`AttributeError`/`TypeError` before retrying.
+Provider calls and local fallbacks are written to the usage log with backend,
+token, cost, and timing information. `API_DAILY_BUDGET_USD` can cap paid use;
+`0` means no application-level cap. Unknown model prices remain marked unknown
+instead of being silently assigned an incorrect cost.
 
-Session status is persisted in SQLite after each phase (`started → papers_collected → review_done → question_selected → hypotheses_generated → code_generated → experiment_run`), so both the CLI and the Web UI can resume a session and skip already-completed phases.
-
-### Local model backends
-
-| Priority | Backend | Notes |
-|---|---|---|
-| 1 | **Ollama** (`models/ollama_model.py`) | HTTP client to a local Ollama server; auto-starts `ollama serve`; resolves `OLLAMA_MODEL` by exact/prefix match |
-| 2 | **llama-cpp-python GGUF** (`models/local_model.py`) | Qwen2.5-14B-Instruct Q4 + nomic-embed-text; requires downloaded `.gguf` files |
-| 3 | **API-only** | Claude handles every task; no local model registered |
-
-The chosen local model is injected into `APIModel` as its offline fallback (`api_model.set_local_model(...)`), and is also used directly for LOCAL-routed tasks (keyword extraction, paper summarisation, embeddings) per `router.py`.
-
-**Web UI note:** the UI never loads `ChromaDB` (`ui/runner.py`'s `_DummyVectorDB`) because ChromaDB is incompatible with Python 3.14 at the time of writing. Papers and hypotheses are read from SQLite only; embedding-based similarity search is inert in the Web UI path (zero vectors), same as `--skip-local` in the CLI.
-
-### Web UI (`ui/`)
-
-- `ui/app.py` — FastAPI routes + `/ws/{session_id}` WebSocket
-- `ui/runner.py` — `SessionRunner` runs the pipeline in a background thread; `QueueConsole` monkey-patches each agent module's `console` object so `rich` output becomes structured JSON events on the queue
-- `ui/report_renderer.py` — turns the Phase 8 JSON report into Markdown / LaTeX / PDF, no extra LLM calls
-- `ui/static/index.html` — single-file SPA (dark theme)
-- Interactive step: Phase 3 (research question selection) emits a `questions` event and blocks on a `threading.Event` until `POST /api/sessions/{id}/select-question` arrives
-- `run_ui.py` picks up `RUNNER_PYTHON` / `RUNNER_MAX_FIX_ATTEMPTS` from your `.env` (see `.env.example`) — point `RUNNER_PYTHON` at a GPU-enabled interpreter if training needs CUDA
+ResearchAgentLab currently provides no managed model credits. Hosted users must
+provide their own provider key, and local users can choose local-only mode.
 
 ---
 
-## Directory layout
+## Data, privacy, and execution safety
 
-```
+- Session state and versioned artifacts are stored in SQLite under `DATA_DIR`.
+- User-supplied provider keys stored by the application are encrypted at rest.
+- `.env`, local databases, raw experimental outputs, private notes, caches, and
+  active run directories are excluded from version control.
+- Dataset downloads reject loopback and private-network targets. Public-host
+  access can be narrowed with `DATASET_ALLOWED_HOSTS`.
+- Generated dependency entries that are URLs, paths, or pip options are
+  refused. Set `RUNNER_ALLOW_PIP=0` to disable generated package installation.
+- Hosted mode disables model-written code execution by default. Set
+  `ALLOW_CODE_EXECUTION=1` only when the runner is isolated from the host and
+  other users.
+
+Before staging changes, inspect the complete Git snapshot—not only the current
+diff—to ensure raw data, credentials, private reviews, and local research notes
+are not included.
+
+---
+
+## Repository layout
+
+```text
 research-agent-lab/
-├── main.py                    # CLI entry point
-├── run_ui.py                  # Web UI entry point
-├── download_models.py         # fetches the GGUF fallback models (see .env.example)
-├── config.py                  # all paths, env vars, tuning knobs
-├── router.py                  # LOCAL vs API task routing
-├── requirements.txt
-├── LICENSE
-├── agents/
-│   ├── orchestrator.py        # CLI pipeline controller
-│   ├── paper_collection.py    # Phase 1
-│   ├── literature_review.py   # Phase 2
-│   ├── gap_analysis.py        # Phase 3
-│   ├── hypothesis.py          # Phase 4
-│   ├── experiment_agent.py    # Phase 5 — domain-specific codegen (Retrieval/NLP/CV/DA/RL)
-│   ├── experiment_runner.py   # Phase 6 — install/pretrain/train/evaluate + auto-fix
-│   ├── quality_review.py      # Phase 7 — AI-judge peer review + rubric-based checks
-│   ├── report_agent.py        # Phase 8 — structured JSON research report
-│   └── self_bugfix_agent.py   # retry/repair wrapper used by phases 1-6
-├── models/
-│   ├── ollama_model.py        # primary local backend (HTTP → Ollama server)
-│   ├── local_model.py         # fallback local backend (llama-cpp-python GGUF)
-│   └── api_model.py           # Claude API wrapper (cost logging, retries, local fallback)
-├── memory/
-│   ├── note_db.py             # SQLite: sessions, papers, hypotheses, code, runs
-│   └── vector_db.py           # ChromaDB paper embeddings (CLI path only, requires Python ≤3.12)
-├── tools/
-│   ├── sources/               # multi-source paper search: OpenAlex, Europe PMC, Crossref, OpenReview
-│   ├── rate_limit.py          # per-source 20-30 s pacing + 7-day blocks after rate limiting
-│   ├── arxiv_fetcher.py
-│   ├── semantic_scholar.py    # citation-sorted canon-seeding for Phase 1
-│   ├── pdf_parser.py          # pymupdf → pypdf fallback
-│   ├── dataset_resolver.py    # maps topic → real HF benchmark dataset
-│   └── cost_tracker.py
-├── ui/
-│   ├── app.py                 # FastAPI app + WebSocket
-│   ├── runner.py              # SessionRunner (background thread pipeline)
-│   ├── report_renderer.py     # JSON → Markdown/LaTeX/PDF
-│   └── static/index.html      # SPA frontend
-├── tests/                      # pytest regression suite (no real API/network calls)
-├── experiments/                # generated experiment codebases (hypothesis_N/)
-└── data/
-    ├── papers/                 # downloaded PDFs
-    ├── reports/{session_id}/   # rendered report.json/.md/.tex/.pdf
-    └── db/                     # research.db (SQLite) + chroma/ (ChromaDB)
+├── agents/          research agents, protocol lifecycle, gates, manifests
+├── memory/          SQLite persistence, accounts, encrypted keys, provenance
+├── models/          Ollama, llama.cpp, and paid-provider adapters
+├── tools/           scholarly sources, analysis blocks, runners, logging
+├── ui/              FastAPI application and working single-page interface
+├── web/             separate static public website
+├── tests/           deterministic regression and safety tests
+├── research_logs/   public benchmark, baseline, taxonomy, and claims records
+├── main.py          CLI entry point
+├── run_ui.py        application entry point
+├── config.py        environment-backed configuration
+└── DEPLOYMENT.md    hosting and security guidance
 ```
 
----
-
-## Config reference (`config.py` / `.env`)
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | — | required for any API-routed phase |
-| `API_MODEL` | `claude-sonnet-4-5` | Claude model id |
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server address |
-| `OLLAMA_MODEL` | `llama3.1:8b` | tag to resolve (prefix match supported) |
-| `LOCAL_MODEL_PATH` / `EMBED_MODEL_PATH` | `~/models/...gguf` | GGUF fallback paths |
-| `N_GPU_LAYERS` / `EMBED_N_GPU_LAYERS` | `35` / `33` | llama-cpp GPU offload (RTX 3060 Ti tuned; `0` = CPU-only) |
-| `RUNNER_PYTHON` | current interpreter | interpreter used for Phase 6 subprocesses (set to a GPU/PyTorch env if training needs CUDA) |
-| `RUNNER_MAX_FIX_ATTEMPTS` | `3` | auto-fix attempts per Phase 6 script (`0` disables) |
-| `RUNNER_*_TIMEOUT` | see `config.py` | per-phase subprocess timeouts, seconds; `0` = unlimited |
-| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | embedding model for Phase 1 ranking and Phase 3 evidence/variable checks |
-| `OLLAMA_NUM_CTX` | `8192` | context window sent to Ollama; a prompt that fills it raises instead of being silently truncated |
-| `PAPER_SOURCES` | `arxiv,openalex,europepmc,crossref,openreview` | sources searched in Phase 1 and gap validation |
-| `SOURCE_MAX_RESULTS` | `25` | results per source, per query |
-| `REQUEST_INTERVAL_MIN_S` / `REQUEST_INTERVAL_MAX_S` | `20` / `30` | random spacing between requests to the same source |
-| `SOURCE_BLOCK_DAYS` | `7` | days a source is left alone after it returns a rate-limit response |
-| `OPENALEX_API_KEY` | — | required by OpenAlex since Feb 2026 (free); source is skipped without it |
-| `CONTACT_EMAIL` | — | Crossref polite pool (`mailto`) and User-Agent contact |
-| `OPENREVIEW_USERNAME` / `OPENREVIEW_PASSWORD` | — | OpenReview requires an account to read; source is skipped without it |
-| `RELEVANCE_MARGIN` | `0.10` | keep papers within this cosine margin of the best match |
-| `DATASET_MAX_MB` | `200` | size cap for a dataset URL found in the brief, downloaded once to read its columns for the research-question data check |
-| `CANON_SEED_ENABLED` | `1` | supplement search with highly-cited papers (Phase 1) |
-| `CANON_SEED_COUNT` | `5` | max canon-seeded papers per session |
-| `CANON_MIN_CITATIONS` | `20` | minimum citation count to qualify as canon |
-| `SEMANTIC_SCHOLAR_API_KEY` | — | optional; without it requests share one throttled anonymous pool |
-| `LOG_LEVEL` | `INFO` | Python logging level |
+Generated studies, datasets, databases, raw logs, confirmatory packages, and
+private working files are intentionally not part of the public source tree.
 
 ---
 
 ## Testing
 
+Run the deterministic suite:
+
 ```bash
-python -m pytest tests/ -v
+python -m pytest -q
 ```
 
-53 tests, no real API or network calls (`APIModel`, `ArxivFetcher.search`, `SemanticScholarFetcher.search_top_cited` are mocked). Each file pins a specific regression:
+The suite covers, among other areas:
 
-| File | Pins |
-|---|---|
-| `test_gap_validation.py` | Gap-claim extraction/verification against a live arXiv search, and every degradation path (malformed JSON, failed verification call, markdown-fenced JSON) |
-| `test_canon_seeding.py` | Merge/dedup/top-K-survival logic for Semantic-Scholar-sourced canon papers |
-| `test_domain_routing.py` | System-prompt/file-spec domains resolve from one source (can't drift apart), and word-boundary keyword matching (`"research"` no longer false-matches `"search"`) |
-| `test_cost_tracking.py` | Local-fallback calls log at $0 with a `local:` model prefix; a broken cost-tracker never crashes a successful response; `call_count(since_timestamp=...)` |
-| `test_quality_review.py` | Pre-execution domain-alignment gate catches wrong-domain code without needing eval data |
-| `test_baseline_literature_check.py` | Baseline-vs-literature number comparison (match/diverge/inconclusive), and that extraction never fabricates a number when the LLM honestly reports "not found" |
-| `test_ai_judge_review.py` | Full expert-reviewer schema (claim ledger, cost-tag derivation/sorting, prompt-injection flagging, claims-before-results prompt ordering), backward-compat with the older output shape, graceful degradation on LLM/JSON failure |
+- protocol lifecycle, hashes, intent identity, and methodology gates;
+- trusted-apparatus and candidate-pool integrity;
+- scientific and result conformance;
+- exposure, contamination, prompt-injection, and path safety;
+- provider adapters, cost tracking, rate limits, and local fallback;
+- account ownership, encrypted keys, backups, and restart recovery;
+- declared-dataset audits, analysis plans, results, and claim checks;
+- generated-code preflight, repair boundaries, and hosted-mode restrictions.
+
+Provider canaries and scientific experiments are not unit tests. Run and label
+them separately, preserve their raw records, and never promote pilot or
+post-hoc results to confirmatory evidence.
+
+---
+
+## Deployment
+
+The repository contains two deployable surfaces:
+
+- `web/` is a static public website.
+- The Python application is a long-running, stateful FastAPI service with
+  WebSockets and persistent storage.
+
+Do not deploy the React design-reference application screens as if they were
+live account data. Do not enable generated-code execution on a shared host
+without an isolated runner. See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the current
+container, storage, proxy, account, and security requirements.
 
 ---
 
-## Cost tracking
+## Research and evidence discipline
 
-Every Claude API call — and every local-model fallback call, at $0 — is logged to `data/db/research.db` (`api_usage_log` table) via `tools/cost_tracker.py`, so the table is a complete record of which backend served every request, not just a spend ledger. A summary prints at the end of a CLI session and is available at `GET /api/sessions/{id}` (`cost_usd`) in the Web UI.
+Meaningful research changes are classified, measured against a named baseline,
+recorded with raw evidence, and connected to a claims ledger. Development,
+pilot, confirmatory, provider-integration, and post-hoc results remain separate.
 
-Approximate cost for a typical session (Phases 3, 4, 5, 7, 8 use the API; Phases 1/2 use the local model):
-- `claude-sonnet-4-5`: roughly $0.10–0.40 USD depending on paper count and experiment complexity.
+See:
 
----
+- [`research_logs/README.md`](research_logs/README.md) — evidence workflow
+- [`research_logs/baselines.md`](research_logs/baselines.md) — preserved baselines
+- [`research_logs/taxonomy.md`](research_logs/taxonomy.md) — failure taxonomy
+- [`research_logs/paper_evidence/claims.md`](research_logs/paper_evidence/claims.md) — claim boundaries
+
+## Known boundaries
+
+- The strongest intent-fidelity evidence is currently in the Choice-Set domain.
+- The completed Choice-Set result uses one candidate pool and one local model
+  digest; it is not evidence about real users or all autonomous agents.
+- Explicit approval was at ceiling in the confirmatory run.
+- A full cross-family free-form-versus-constrained SSFR comparison remains
+  future work.
+- Local execution is not a security sandbox.
+- Paid-provider availability, model aliases, and pricing can change outside
+  this repository.
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) — free for any noncommercial purpose (personal use, research, education, nonprofits). Commercial use requires a separate license from the copyright holder.
-
----
-
-## Design notes
-
-Deeper rationale for a few non-obvious pieces, kept here rather than inline above so the sections you actually need to run this stay short.
-
-<details>
-<summary><b>AI judge review (Phase 7)</b></summary>
-
-`QualityReviewAgent._ai_judge_review()` runs an expert-reviewer protocol (`memory/EXPERT_REVIEWER_PROMPT.md`, built on `memory/PEER_REVIEW_GUIDE.md`) modeled on ARR/ICLR/NeurIPS conference reviewing, replacing a looser "simulate 2 experts, list some concerns" prompt.
-
-- **Claim ledger before results** — the prompt presents the hypothesis's claims before the eval data and requires building a claim ledger (id, claim, scope, evidence location, actual numbers, verdict: supported/partially/contradicted/unlocatable) *before* looking at results, to block hindsight bias.
-- **Eight named adversarial audits** — cross-consistency, specification-gap hunting, structural-nullification (is a claimed component mathematically incapable of an effect given its actual parameter values?), instrument-validity, statistical-power, leakage-channel separation, ablation-contradiction, and claim-scope narrowing.
-- **Mandatory self-audit** against ARR's forbidden-critique list H1-H17 (hindsight bias, "not novel" without a citation, SOTA-chasing, penalizing honest disclosure) — draft weaknesses first, then delete/reclassify any that match.
-- **Must-check confirmation** against ARR M/T/R/G (unmotivated sample selection, overclaiming scope, missing statistical rigor, misrepresented citations).
-- **Hard constraints** — an instruction-source boundary treating any text in the reviewed code/hypothesis that addresses the judge as data, not a command (flagged in `prompt_injection_flag` if found); no fabricated citations/numbers; no claims of having run or reproduced anything; an honest `not_checked` blind-spot declaration.
-- Cross-checks the hypothesis's claimed novelty against the Phase 3 gap-validation verdicts — a claim built on a gap marked `LIKELY_ADDRESSED` is flagged as an overclaiming risk.
-
-Output: claim ledger, strengths, weaknesses (what/where/why-it-matters/fix, tagged with a 4-tier cost — `rewrite`/`reanalysis`/`re-eval`/`new_compute`), questions for the authors, Soundness/Excitement scores (1-5), an accept/borderline/major_revision/reject verdict, one sentence on what would raise the score, and the not-checked list — all surfaced in the Web UI's Review tab. Degrades gracefully to rule-based findings only on any LLM/JSON failure.
-</details>
-
-<details>
-<summary><b>Baseline literature cross-check (Phase 7)</b></summary>
-
-Real research practice compares a reproduced baseline against a specific published number, not just "did it train without crashing." `QualityReviewAgent._check_baseline_literature_match()` extracts (a) which specific number in `eval_results.json` represents the baseline's result, and (b) an explicitly-quoted comparable number from the session's collected paper abstracts — both via LLM calls instructed to return an honest "not found" rather than a guess. A >30% relative deviation is flagged `fail` (the baseline likely isn't faithful, so a "novel method beats baseline" claim built on it is untrustworthy); within tolerance is `pass`; either number missing is `warn` (inconclusive, not evidence of a problem). Never blocks the pipeline.
-</details>
-
-<details>
-<summary><b>Pre-execution domain-alignment gate (between Phase 5 and 6)</b></summary>
-
-The full Phase 7 review used to run only after Phase 6 execution, so a wrong-domain codebase (e.g. RL environment code generated for a retrieval hypothesis) wasn't caught until after burning the compute/time to run it. `QualityReviewAgent.pre_execution_check()` runs just the two checks that don't need eval results (code-domain-alignment, baseline-presence) right after Phase 5, before Phase 6 starts, and warns loudly (without blocking) on a mismatch.
-</details>
-
-<details>
-<summary><b>Cost/backend logging integrity</b></summary>
-
-An audit found `api_usage_log` had zero rows for several sessions that definitely made API calls — the likely cause: the Anthropic API silently became unavailable mid-run and `APIModel` fell back to the local model for the rest of that session, a path that logged nothing. Fixed by having `APIModel._local_fallback` log every local-model call too, at `cost_usd=0` with `model="local:<backend>"`, and wrapping the cost-log write so a DB hiccup can never crash or swallow an already-successful response. The Web UI also runs a pipeline-end healthcheck (`ui/runner.py`): if a session reaches `question_selected` or later (which requires at least 2 API-routed calls) with zero logged calls for that run, it emits a `log_integrity_warning` event.
-</details>
-
-<details>
-<summary><b>Unified domain routing (Phase 5)</b></summary>
-
-`ExperimentAgent` picks a domain-specific system prompt (steers *what* the LLM writes) and a domain-specific file spec (decides *which files* get created) per hypothesis. These used to be two separately-maintained keyword lists that had already drifted apart — one had extra keywords the other never got, so a hypothesis could get a file skeleton steered by the wrong system prompt. `_select_domain()` now returns both from a single `DomainSpec`, so they cannot disagree by construction; the resolved domain is persisted to `hypotheses.domain`. Keyword matching also moved from plain substring checks to leading-word-boundary regex (`"research"` was matching the `"search"` keyword and misrouting to the retrieval domain).
-</details>
-
-<details>
-<summary><b>Phase 1 canon seeding</b></summary>
-
-Keyword/recency-based arXiv search structurally misses highly-cited foundational papers that predate current phrasing trends. `PaperCollectionAgent` supplements arXiv results with `tools/semantic_scholar.py`, a citation-count-sorted Semantic Scholar query, and guarantees those papers survive the top-K cut regardless of how they rank on raw topic-embedding similarity. Deduplicates against the arXiv set by arXiv id and, as a fallback, normalized title. Best-effort by design — a down or rate-limited Semantic Scholar degrades to skipping canon-seeding, never blocks Phase 1.
-</details>
-
-<details>
-<summary><b>Phase 3 gap validation</b></summary>
-
-Free-generated gap claims ("no similar comparisons exist in RL") are frequently false — they describe work that already exists but wasn't in the collected paper set. Before a gap report is shown to the user or fed into research-question generation, `GapAnalysisAgent.validate_gap_report()` extracts each falsifiable claim, runs a fresh targeted arXiv search for it, and asks the LLM to render a skeptical verdict (`LIKELY_ADDRESSED` / `UNCERTAIN` / `CONFIRMED_GAP`) with cited evidence. Verdicts are appended to the gap report and persisted separately in `research_sessions.gap_validation` (JSON) for audit; question-generation is instructed to avoid building questions primarily on `LIKELY_ADDRESSED` claims. Degrades gracefully — any failure falls back to skipping/marking `UNCERTAIN` rather than blocking the pipeline.
-</details>
+[PolyForm Noncommercial 1.0.0](LICENSE). Noncommercial use—including personal,
+academic, educational, and nonprofit research—is permitted. Commercial use
+requires a separate license from the copyright holder.

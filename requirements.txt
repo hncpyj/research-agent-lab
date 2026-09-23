@@ -1,0 +1,34 @@
+# Core
+anthropic>=0.25.0
+openai>=1.30.0       # OpenAI, Gemini's OpenAI-compatible endpoint, and self-hosted servers
+arxiv>=2.1.0
+rich>=13.7.0
+numpy>=1.26.0          # cosine-similarity paper ranking (agents/paper_collection.py)
+pandas>=2.2.0          # the data layer: agents/data_audit.py, tools/panel_data.py
+scipy>=1.11.0          # the statistical tests the analysis blocks run (tools/analysis_blocks.py)
+pyyaml>=6.0            # experiment manifests (agents/experiment_runner.py)
+
+# Web UI
+cryptography>=42.0.0   # encrypts each user's stored API key (memory/api_keys.py)
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+websockets>=12.0
+
+# PDF parsing (install at least one)
+pymupdf>=1.24.0        # recommended: fast and accurate (aka fitz)
+pypdf>=4.0.0           # fallback
+
+# SQLite ORM (standard library sqlite3 is used directly; SQLAlchemy optional)
+# sqlalchemy>=2.0.0
+
+# Testing
+pytest>=8.0.0
+
+# Local model (install with CUDA support - see README)
+# llama-cpp-python      # installed separately with CUDA wheel
+
+# CLI-only vector search (NOT used by the Web UI — see README's
+# "Local model backends" note). Skip unless you're running the CLI path
+# and need embedding-based similarity search. Has no wheel for Python 3.14
+# at the time of writing — install this only on 3.9-3.12.
+# chromadb>=0.5.0

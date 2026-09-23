@@ -1,0 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400&family=Work+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --font-sans: 'Work Sans', sans-serif;
+  --font-display: 'Fraunces', serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+:root {
+  --background: #07090f;
+  --foreground: #e4e8f0;
+  --card: #0d1018;
+  --card-foreground: #e4e8f0;
+  --primary: #00c8a8;
+  --primary-foreground: #07090f;
+  --secondary: #131825;
+  --secondary-foreground: #a0a8bc;
+  --muted: #111520;
+  --muted-foreground: #6b7490;
+  --accent: #f0a030;
+  --accent-foreground: #07090f;
+  --border: rgba(255,255,255,0.07);
+  --ring: #00c8a880;
+  --radius: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+.font-display { font-family: var(--font-display); }
+.font-mono { font-family: var(--font-mono); }
+
+/* Light theme for public marketing pages */
+.public-light {
+  --background: #f7f8fc;
+  --foreground: #0f1117;
+  --card: #ffffff;
+  --card-foreground: #0f1117;
+  --primary: #0aaa90;
+  --primary-foreground: #ffffff;
+  --secondary: #eef0f6;
+  --secondary-foreground: #4a5168;
+  --muted: #f0f2f7;
+  --muted-foreground: #6b7280;
+  --accent: #d97706;
+  --accent-foreground: #ffffff;
+  --border: rgba(0,0,0,0.08);
+  --ring: #0aaa9040;
+  background-color: var(--background);
+  color: var(--foreground);
+}

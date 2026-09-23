@@ -1,0 +1,10 @@
+{
+  "description": "The Research Agent Lab webpage facilitates collaboration and resource sharing for researchers, enhancing productivity and streamlining project management.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

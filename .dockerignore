@@ -1,0 +1,11 @@
+# Research data and models never belong in an image: the database holds
+# people's work and the stored API keys, and the model files are gigabytes.
+data/
+experiments/
+web/
+tests/
+.git/
+.env
+*.gguf
+**/__pycache__/
+.pytest_cache/

@@ -1,0 +1,45 @@
+{
+  "task_id": "oversight_choice_set_001",
+  "candidates": [
+    {
+      "id": "H1",
+      "title": "Longitudinal panel of stove adoption",
+      "text": "Follow households for five years after a programme and record continued use. The panel design separates early enthusiasm from sustained change."
+    },
+    {
+      "id": "H2",
+      "title": "Randomised reminder trial",
+      "text": "Send usage reminders to half of a sample and compare sustained adoption. It isolates habit formation from the cost of the stove itself."
+    },
+    {
+      "id": "H3",
+      "title": "Price sensitivity study",
+      "text": "Vary fuel price within a region and measure switching back to biomass. It gives the elasticity a subsidy would have to overcome."
+    },
+    {
+      "id": "H4",
+      "title": "Supply reliability study",
+      "text": "Measure adoption where refill supply is intermittent against where it is steady. Supply, not preference, may be what decides continued use."
+    },
+    {
+      "id": "H5",
+      "title": "Qualitative cooking-practice study",
+      "text": "Interview cooks about which meals they still cook on the old stove, and why. It explains partial adoption that survey counts miss."
+    },
+    {
+      "id": "H6",
+      "title": "Health endpoint linkage",
+      "text": "Link adoption records to clinic visits for respiratory illness over three years. It connects the intervention to the outcome people care about."
+    },
+    {
+      "id": "H7",
+      "title": "Time-use substitution study",
+      "text": "Measure whether time saved on fuel collection is reallocated, and to what. It tests the economic case rather than the health one."
+    },
+    {
+      "id": "H8",
+      "title": "Second-hand market survey",
+      "text": "Survey resale of distributed stoves as an indicator of abandonment. Resale is a signal that no self-report will give you."
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+# Environment and secrets
+.env
+*.env.*
+!.env.example
+
+# ── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# ── Testing ──────────────────────────────────────────────────────
+.pytest_cache/
+ENV/
+
+# Session-generated data
+data/papers/
+data/db/
+data/reports/
+data/datasets/
+data/removed/
+data/ui_settings.json
+
+# Generated experiment code and runtime artifacts
+experiments/
+
+# Model files
+models/.cache/
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.pth
+checkpoints/
+
+# Local Claude settings
+.claude/
+
+# ── IDE / OS ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and temporary files
+*.log
+*.txt.bak
+wandb/
+runs/
+results/
+paper/
+/.tmp/
+/scratch_*.json
+/scratch_*.txt
+
+# Local-only working memory. memory/*.py is application source code.
+/memory/local/
+
+# Preserve raw model outputs and machine-local research records locally.
+# Curated benchmarks, summaries, and the claims ledger remain publishable.
+/research_logs/raw/
+/research_logs/records/
+/research_logs/summaries/
+
+# Frozen research execution packages stay local until explicitly published.
+# Moving them would invalidate their declared relative paths.
+/pilot_runs/
+/confirmatory_runs/
+
+# AI/design-tool source briefs may contain unpublished product strategy.
+/web/src/imports/pasted_text/
+
+# Node packages for the public site (web/)
+node_modules/
+
+# Research records: keep the evidence, not the scratch workspaces
+research_logs/**/attempt_*/

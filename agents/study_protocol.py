@@ -93,6 +93,10 @@ _SCIENTIFIC_FIELDS = (
     "required_outputs",
     "allowed_agent_actions", "forbidden_agent_actions", "requires_training",
     "dataset_policy",
+    # The identity of what is varied and measured is part of the science. Two
+    # protocols with the same words and different concept ids are not the same
+    # study, and the hash has to be able to say so.
+    "concepts",
 )
 
 # What a family has to have said before its protocol may be frozen.
@@ -150,6 +154,22 @@ class StudyProtocol:
     allowed_agent_actions: tuple[str, ...] = ()
     forbidden_agent_actions: tuple[str, ...] = ()
     resource_constraints: dict = field(default_factory=dict)
+
+    # -- scientific identity --------------------------------------------------
+    # What each display name in this protocol *is*, as a concept id from
+    # `agents/scientific_concepts.py`: {"target_selection_rate": "target_selection"}.
+    # Wording is for people and changes freely; the id is the science and does
+    # not. A component that renames a field and carries the entry across has
+    # renamed nothing scientifically; one that renames without carrying it has
+    # dropped the identity, and the gate then has to reconstruct it from the
+    # words and says so. `concept_provenance` records, per display name,
+    # whether the id came from the approved intent or was reconstructed.
+    #
+    # This is not a second source of truth. The approved intent supplies the
+    # identities; after the freeze this protocol remains the scientific
+    # contract, and these ids are part of what is frozen.
+    concepts: dict = field(default_factory=dict)
+    concept_provenance: dict = field(default_factory=dict)
 
     # -- lifecycle ------------------------------------------------------------
     status: Status = Status.DRAFT

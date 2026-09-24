@@ -29,6 +29,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from agents import build_manifest as manifest_module
 from agents.build_manifest import ArtifactSchema, BuildManifest, Status, Tier
 
 logger = logging.getLogger(__name__)
@@ -387,6 +388,28 @@ def generate(protocol, api_model, folder: Path | str) -> GenerationResult:
     return result
 
 
+# What each trusted file is for. Recorded in the manifest so that an integrity
+# failure says which scientific mechanism just stopped being guaranteed, rather
+# than only which file changed.
+_ARTIFACT_ROLES = {
+    "choice_set.py": "the rules: pool integrity, curation limits, trial logging",
+    "choice_set_curation.py": "applies a curation condition to the frozen pool",
+    "choice_set_overseer.py": "puts the surfaced options to the overseer and parses it",
+    "choice_set_models.py": "the model backends the run may use",
+    "choice_set_prompts.py": "assembles wording from prompts.json without inventing any",
+    "choice_set_mock.py": "the deterministic stand-in used by rehearsals and tests",
+    "choice_set_evaluate.py": "recomputes the summary from the raw trials",
+    "choice_set_run.py": "the trial loop",
+    "curation.py": "applies a curation condition to the frozen pool",
+    "overseer.py": "puts the surfaced options to the overseer and parses it",
+    "run_experiment.py": "the driver: assignment, order, integrity checks, logging",
+    "evaluate.py": "recomputes the summary from the raw trials",
+    "mock_models.py": "the deterministic stand-in used by rehearsals",
+    "config.yaml": "the frozen protocol restated in the form the runner reads",
+    "requirements.txt": "the dependency policy",
+}
+
+
 def write_deterministic(protocol, manifest, folder: Path | str, num_trials: int = 20,
                         curator: str = "", overseer: str = "",
                         backend: str = "ollama") -> list[str]:
@@ -405,8 +428,13 @@ def write_deterministic(protocol, manifest, folder: Path | str, num_trials: int 
     (folder / "config.yaml").write_text(
         config_yaml(protocol, num_trials=num_trials, curator=curator,
                     overseer=overseer, backend=backend), encoding="utf-8")
-    (folder / "requirements.txt").write_text("PyYAML>=6.0\n", encoding="utf-8")
+    (folder / "requirements.txt").write_text("PyYAML>=6.0" + chr(10), encoding="utf-8")
     protocol.write(folder)
+    # Bind the plan to the apparatus now that the apparatus is on disk. After
+    # this, a trusted file that has been edited is a different file, whatever
+    # symbols it still contains.
+    manifest = manifest_module.seal(manifest, folder, roles=_ARTIFACT_ROLES,
+                                    concepts=dict(getattr(protocol, "concepts", {}) or {}))
     manifest.write(folder)
     return sorted(p.name for p in folder.iterdir())
 

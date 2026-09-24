@@ -38,10 +38,12 @@ class BuildOutcome:
     folder: Path | None = None
     protocol = None
     manifest = None
+    fidelity = None
     review = None
     conformance = None
     preflight = None
     generation = None
+    summary_path = None
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -52,7 +54,23 @@ class BuildOutcome:
         return f"{self.status.value}" + (f": {self.notes[0]}" if self.notes else "")
 
 
+def may_freeze(fidelity, review) -> bool:
+    """
+    The one place the two verdicts meet, and the only way they may combine.
+
+    Both must pass. A methodology PASS never clears a fidelity FAIL, and a
+    fidelity PASS never clears a methodology FAIL; NEEDS_HUMAN from either one
+    blocks, because "someone should look at this" is not permission.
+    """
+    from agents import intent_fidelity, methodology_review
+
+    return (fidelity is not None and review is not None
+            and fidelity.status == intent_fidelity.PASS
+            and review.verdict == methodology_review.PASS)
+
+
 def build(hypothesis: str, api_model, folder: Path | str, *,
+          approved=None, protocol=None,
           design: dict | None = None, reviewer=None, num_trials: int = 20,
           curator: str = "", overseer: str = "", backend: str = "ollama",
           run_preflight: bool = True) -> BuildOutcome:
@@ -62,33 +80,70 @@ def build(hypothesis: str, api_model, folder: Path | str, *,
     `api_model` writes the content. `reviewer`, if given, is asked for doubts
     about the design; it can send a passing design to NEEDS_HUMAN and can never
     approve one that failed a mechanical check.
+
+    `protocol` is a already-drafted StudyProtocol to take through the gates
+    instead of deriving one from `hypothesis`. It changes nothing about how it
+    is checked.
+
+    `approved` is the ranked record of what a person signed off -- an
+    `intent_fidelity.ApprovedIntent`. Without one, the protocol's own question
+    and hypothesis stand in for it, which is weaker: a commitment that lives
+    only in a structured approval cannot then be enforced, and a choice nobody
+    approved is harder to tell from one somebody did.
     """
     from agents import build_manifest as manifest_module
-    from agents import methodology_review, scientific_conformance
+    from agents import intent_fidelity, methodology_review, scientific_conformance
     from agents.experiment_agent import build_spec
 
     folder = Path(folder)
     outcome = BuildOutcome(status=Status.DESIGN_IN_PROGRESS, folder=folder)
 
     # -- 1. what the study is -------------------------------------------------
-    protocol = build_spec(hypothesis, design or {})
+    # A protocol drafted upstream may be handed in; otherwise it is derived
+    # from the hypothesis here. Either way it is an input to the gates below
+    # and is never trusted because of where it came from.
+    protocol = protocol if protocol is not None else build_spec(hypothesis, design or {})
+    # Attach the scientific identity of each name before anything compares
+    # them, and before the freeze, so the ids are part of what is frozen. A
+    # rename that carries its id across is then free; one that drops it is
+    # visible as a reconstructed identity rather than passing unnoticed.
+    protocol = intent_fidelity.propagate_identity(protocol, approved)
     outcome.protocol = protocol
 
-    # -- 2. whether it can carry its claim ------------------------------------
+    # -- 2. is it still the study that was asked for? -------------------------
+    # Before the methodology review, and never merged with it: a sound design
+    # for a different question is the failure this system exists to prevent,
+    # and it would pass a review that only asks whether the design is sound.
+    fidelity = intent_fidelity.check(protocol, reviewer=reviewer, approved=approved)
+    outcome.fidelity = fidelity
+
+    # -- 3. is the design sound? ----------------------------------------------
     review = methodology_review.review(protocol, reviewer=reviewer)
     outcome.review = review
-    if not review.approved:
-        outcome.status = Status.DESIGN_REJECTED
-        outcome.notes.append(review.summary())
+
+    # -- 4. the human-visible boundary ----------------------------------------
+    # Written whatever the verdicts are: a refusal is exactly when someone
+    # needs to be able to read what was proposed.
+    folder.mkdir(parents=True, exist_ok=True)
+    outcome.summary_path = intent_fidelity.write_summary(protocol, fidelity, folder, review)
+
+    if not may_freeze(fidelity, review):
+        outcome.status = (Status.INTENT_FIDELITY_FAILED if fidelity.status == "FAIL"
+                          else Status.DESIGN_NEEDS_HUMAN if fidelity.status == "NEEDS_HUMAN"
+                          else Status.DESIGN_REJECTED)
+        outcome.notes.append(fidelity.summary() if not fidelity.passed else review.summary())
         return outcome
 
-    # -- 3. freeze it ---------------------------------------------------------
+    # -- 5. freeze it ---------------------------------------------------------
     protocol = protocol.approve().freeze()
     outcome.protocol = protocol
     outcome.notes.append(f"protocol v{protocol.protocol_version} "
                          f"({protocol.protocol_hash}) frozen")
+    # Rewrite the summary against the frozen protocol, so the persisted
+    # boundary carries the hash the study was actually built from.
+    outcome.summary_path = intent_fidelity.write_summary(protocol, fidelity, folder, review)
 
-    # -- 4. how it will be built ----------------------------------------------
+    # -- 6. how it will be built ----------------------------------------------
     manifest = manifest_module.plan(protocol)
     outcome.manifest = manifest
 
@@ -102,11 +157,16 @@ def build(hypothesis: str, api_model, folder: Path | str, *,
 
     from agents import controlled_llm_scaffold as scaffold
 
-    # -- 5. everything a model has no business deciding -----------------------
+    # -- 7. everything a model has no business deciding -----------------------
     scaffold.write_deterministic(protocol, manifest, folder, num_trials=num_trials,
                                  curator=curator, overseer=overseer, backend=backend)
+    # Writing the apparatus is what lets the plan be sealed around it, so the
+    # manifest on disk is the one that carries the artifact hashes and the one
+    # every later layer is checked against.
+    manifest = manifest_module.BuildManifest.read(folder) or manifest
+    outcome.manifest = manifest
 
-    # -- 6. the study-specific content ----------------------------------------
+    # -- 8. the study-specific content ----------------------------------------
     outcome.status = Status.GENERATION_IN_PROGRESS
     generation = scaffold.generate(protocol, api_model, folder)
     outcome.generation = generation
@@ -116,7 +176,7 @@ def build(hypothesis: str, api_model, folder: Path | str, *,
         return outcome
     outcome.status = Status.GENERATED_UNVERIFIED
 
-    # -- 7. is this the study that was approved? ------------------------------
+    # -- 9. do the artifacts match the frozen protocol? ------------------------------
     conformance = scientific_conformance.verify(folder, protocol, manifest)
     if not conformance.passed and conformance.artifacts_to_regenerate and \
             not conformance.needs_new_protocol:
@@ -139,7 +199,7 @@ def build(hypothesis: str, api_model, folder: Path | str, *,
                                  "protocol version, reviewed and frozen again")
         return outcome
 
-    # -- 8. does the software work? -------------------------------------------
+    # -- 10. does the software work? -------------------------------------------
     if run_preflight:
         from agents import preflight as preflight_module
 

@@ -103,7 +103,7 @@ def verify(folder: Path | str, protocol=None, manifest=None) -> Conformance:
     result = Conformance(PASS)
     _check_plan_matches_protocol(protocol, manifest, result)
     if protocol.scaffold_id == "controlled_llm":
-        _check_controlled_llm(folder, protocol, result)
+        _check_controlled_llm(folder, protocol, result, manifest)
     if result.violations:
         result.verdict = FAIL
     return result
@@ -126,17 +126,22 @@ def _check_plan_matches_protocol(protocol, manifest, result: Conformance) -> Non
 
 # --- the controlled-decision family -------------------------------------------------
 
-def _check_controlled_llm(folder: Path, protocol, result: Conformance) -> None:
+def _check_controlled_llm(folder: Path, protocol, result: Conformance,
+                          manifest=None) -> None:
     config = _read_config(folder, result)
 
     # 1. The conditions and outcomes the study will actually run.
     result.checked.append("conditions match the protocol")
+    # As a set. Which arms the study runs is science; the order they are
+    # listed in is not, and every part of this family resolves an arm by name.
+    # Comparing ordered tuples rejected a config that named the same two
+    # conditions the other way round (N-2, 20260922).
     stated = tuple(config.get("conditions") or ())
-    if stated and stated != tuple(protocol.conditions):
+    if stated and set(stated) != set(protocol.conditions):
         result.violations.append(Violation(
             "conditions", "config.yaml",
-            f"the study would run {list(stated)} but the protocol compares "
-            f"{list(protocol.conditions)}"))
+            f"the study would run {sorted(stated)} but the protocol compares "
+            f"{sorted(protocol.conditions)}"))
 
     result.checked.append("outcomes match the protocol")
     outcomes = config.get("outcomes") or {}
@@ -156,18 +161,15 @@ def _check_controlled_llm(folder: Path, protocol, result: Conformance) -> None:
     result.checked.append("the candidate pool is frozen and shared")
     pool = _read_pool(folder, result)
     if pool is not None:
-        if not pool.get("fingerprint"):
-            result.violations.append(Violation(
-                "ground_truth", "candidate_pool.json",
-                "the pool carries no fingerprint, so an edit to a candidate could not "
-                "be detected"))
-        shown_per_trial = int((config.get("candidate_pool") or {}).get("shown_per_trial", 0))
-        if shown_per_trial and shown_per_trial >= len(pool.get("candidates", [])):
+        _check_pool_fingerprint(folder, pool, result)
+        shown_per_trial = int(
+            (config.get("candidate_pool") or {}).get("shown_per_trial", 0))
+        pool_size = len(pool.get("candidates") or ())
+        if shown_per_trial and shown_per_trial >= pool_size:
             result.violations.append(Violation(
                 "ground_truth", "config.yaml",
-                f"every trial would show {shown_per_trial} of "
-                f"{len(pool.get('candidates', []))} candidates: with nothing withheld "
-                "there is no curation to compare"))
+                f"every trial would show {shown_per_trial} of {pool_size} candidates: "
+                "with nothing withheld there is no curation to compare"))
 
     # 3. The randomisation the protocol requires.
     result.checked.append("target assignment and counterbalancing follow the protocol")
@@ -181,7 +183,10 @@ def _check_controlled_llm(folder: Path, protocol, result: Conformance) -> None:
             "randomisation", "config.yaml",
             "the protocol counterbalances the target; the config does not"))
 
-    # 4. What the apparatus is asked to guarantee. These are properties of the
+    # 4. The apparatus, bound by content first and by interface second.
+    _check_trusted_artifacts(folder, manifest, result)
+
+    # 5. What the apparatus is asked to guarantee. These are properties of the
     #    trusted code, so a violation here means the apparatus was replaced.
     _check_apparatus(folder, protocol, result)
 
@@ -397,3 +402,71 @@ def verify_results(folder: Path | str, protocol=None) -> Conformance:
     if result.violations:
         result.verdict = FAIL
     return result
+
+
+# --- ground truth, and the apparatus that is supposed to protect it -------------------
+
+def _check_pool_fingerprint(folder: Path, pool: dict, result: Conformance) -> None:
+    """
+    Whether the pool is still the pool that was frozen.
+
+    This layer used to ask only whether a fingerprint was *present*, which a
+    file keeps being able to answer after its contents have been changed. A
+    candidate edited in place with the old fingerprint left beside it passed
+    here and was caught one stage later by preflight, incidentally, because
+    loading a pool properly recomputes it (F-C3, 20260922). Ground truth is
+    scientific, so it is owned here, and the fingerprint is recomputed.
+    """
+    result.checked.append("the pool's contents match its fingerprint")
+    stated = pool.get("fingerprint")
+    if not stated:
+        result.violations.append(Violation(
+            "ground_truth", "candidate_pool.json",
+            "the pool carries no fingerprint, so an edit to a candidate could not "
+            "be detected"))
+        return
+    try:
+        from tools.choice_set import CandidatePool
+
+        # from_dict recomputes the fingerprint over canonical content and
+        # refuses when it does not match what the file claims.
+        CandidatePool.from_dict(pool)
+    except Exception as exc:
+        result.violations.append(Violation(
+            "ground_truth", "candidate_pool.json",
+            f"the pool is not the pool that was frozen: {exc}"))
+
+
+def _check_trusted_artifacts(folder: Path, manifest, result: Conformance) -> None:
+    """
+    Whether every trusted apparatus file is still the file the plan was sealed
+    around.
+
+    Identifier grepping is kept below as a second layer, but it is not what
+    decides this. A driver that kept every symbol the grep looks for, still
+    called every function, still imported and still ran, and threw away the
+    shuffled presentation order, passed every layer in the system and produced
+    an accepted result (F-C5, 20260922). A hash cannot be talked round that
+    way: the file either is the trusted file or it is not.
+    """
+    from agents import build_manifest as manifest_module
+
+    result.checked.append("every trusted artifact is the one the plan was sealed around")
+    if manifest.manifest_version < 2 or not manifest.trusted_artifacts:
+        result.violations.append(Violation(
+            "apparatus_integrity", "build_manifest.json",
+            "the plan binds no trusted artifact by content, so the apparatus cannot be "
+            "checked for edits that keep its symbols; a study may not be run from it"))
+        return
+    for finding in manifest_module.verify_trusted_artifacts(manifest, folder):
+        if finding.problem == "missing":
+            result.violations.append(Violation(
+                "apparatus_integrity", finding.path,
+                f"{finding.path} is named in the plan and is not here; it is "
+                f"{finding.role}"))
+        else:
+            result.violations.append(Violation(
+                "apparatus_integrity", finding.path,
+                f"{finding.path} has been changed since the plan was sealed "
+                f"(expected {finding.expected[:16]}, found {finding.found[:16]}). It is "
+                f"{finding.role}, so whatever it does now is not what was verified."))

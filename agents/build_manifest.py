@@ -29,8 +29,9 @@ discarded its own curation and a config naming conditions the design never had.
 
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 
@@ -54,6 +55,10 @@ class Status(str, Enum):
     NOT_STARTED = "not_started"
     DESIGN_IN_PROGRESS = "design_in_progress"
     DESIGN_REJECTED = "design_rejected"
+    # Kept apart from DESIGN_REJECTED: the design may be perfectly sound and
+    # still not be the study that was approved.
+    INTENT_FIDELITY_FAILED = "intent_fidelity_failed"
+    DESIGN_NEEDS_HUMAN = "design_needs_human"
     GENERATION_IN_PROGRESS = "generation_in_progress"
     GENERATION_BLOCKED_RESOURCE = "generation_blocked_resource"
     GENERATION_FAILED_MODEL_OUTPUT = "generation_failed_model_output"
@@ -64,6 +69,43 @@ class Status(str, Enum):
     EXECUTION_IN_PROGRESS = "execution_in_progress"
     EXECUTION_FAILED = "execution_failed"
     COMPLETED = "completed"
+
+
+# The manifest's own schema version. It is recorded in every manifest, so a
+# manifest written before trusted-artifact integrity existed is recognisable as
+# one that cannot be checked for it, rather than one that passed the check.
+MANIFEST_VERSION = 2
+
+
+@dataclass(frozen=True)
+class TrustedArtifact:
+    """
+    One apparatus file, bound to the plan by its content rather than its name.
+
+    Naming a module in the manifest said which file was supposed to be there.
+    It did not say what was supposed to be in it, and an injected fault that
+    kept every symbol the conformance rule looked for while discarding the
+    randomisation the protocol required passed every layer and produced an
+    accepted result (F-C5, 20260922). A hash is what closes that: the file
+    either is the trusted file or it is not.
+    """
+    path: str
+    sha256: str
+    role: str
+
+    def as_dict(self) -> dict:
+        return {"path": self.path, "sha256": self.sha256, "role": self.role}
+
+
+def file_hash(path: Path) -> str:
+    """
+    The hash a trusted artifact is bound by.
+
+    Line endings are normalised first, so that the same file checked out on
+    another platform is the same artifact and not an integrity failure.
+    """
+    body = path.read_bytes().replace(bytes([13, 10]), bytes([10]))
+    return hashlib.sha256(body).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -95,6 +137,13 @@ class BuildManifest:
     contract_tests: tuple[str, ...]
     scientific_conformance_rules: tuple[str, ...]
     smoke_command: tuple[str, ...]
+    # Filled in by `seal` once the apparatus has been copied into the study
+    # folder: the plan binds the content of every trusted file, not its name.
+    trusted_artifacts: tuple[TrustedArtifact, ...] = ()
+    # The scientific identities the approved intent assigned, carried forward so
+    # that a later layer compares identity rather than wording.
+    concepts: dict = field(default_factory=dict)
+    manifest_version: int = MANIFEST_VERSION
 
     def as_dict(self) -> dict:
         data = asdict(self)
@@ -104,6 +153,9 @@ class BuildManifest:
         for key in ("deterministic_artifacts", "contract_tests",
                     "scientific_conformance_rules", "smoke_command"):
             data[key] = list(getattr(self, key))
+        data["trusted_artifacts"] = [a.as_dict() for a in self.trusted_artifacts]
+        data["concepts"] = dict(self.concepts)
+        data["manifest_version"] = self.manifest_version
         return data
 
     def write(self, folder: Path | str) -> Path:
@@ -134,6 +186,11 @@ class BuildManifest:
             contract_tests=tuple(data.get("contract_tests", ())),
             scientific_conformance_rules=tuple(data.get("scientific_conformance_rules", ())),
             smoke_command=tuple(data.get("smoke_command", ())),
+            trusted_artifacts=tuple(
+                TrustedArtifact(path=a["path"], sha256=a["sha256"], role=a.get("role", ""))
+                for a in data.get("trusted_artifacts", ())),
+            concepts=dict(data.get("concepts", {}) or {}),
+            manifest_version=int(data.get("manifest_version", 1)),
         )
 
     @classmethod
@@ -194,3 +251,76 @@ def plan(protocol) -> BuildManifest:
         scientific_conformance_rules=(),
         smoke_command=(),
     )
+
+
+# --- binding the plan to the apparatus it planned -------------------------------------
+
+def seal(manifest: BuildManifest, folder: Path | str,
+         roles: dict | None = None, concepts: dict | None = None) -> BuildManifest:
+    """
+    Record the content of every trusted artifact that is now on disk.
+
+    Called once, after trusted code has copied the apparatus into the study
+    folder and before anything is generated or verified. The manifest then
+    carries a hash of each file rather than only its name, which is the
+    difference between a plan that says what should be there and a plan that
+    says what it is.
+
+    Only files trusted code wrote are sealed. A generated artifact is checked
+    against its schema and its science, not against a hash, because the whole
+    point of it is that a model wrote it.
+    """
+    folder = Path(folder)
+    roles = roles or {}
+    sealed: list[TrustedArtifact] = []
+    for _, name in manifest.trusted_modules:
+        path = folder / name
+        if path.exists():
+            sealed.append(TrustedArtifact(
+                path=name, sha256=file_hash(path),
+                role=roles.get(name, "trusted apparatus copied from tools/")))
+    # Deterministic artifacts are deliberately not sealed by content.
+    # config.yaml is the frozen protocol restated, and every scientific thing
+    # in it -- the arms, the outcomes, the randomisation, how many candidates
+    # are withheld -- is compared against the protocol clause by clause, which
+    # is a stronger check than a hash for what it is. A hash would also refuse
+    # a reserialisation that changed nothing, and refusing the same two arms
+    # written in the other order is the false block this cycle set out to fix.
+    # Executable apparatus is the opposite case: nothing enumerates what it is
+    # supposed to do, so its content is the only thing that can be checked.
+    return replace(manifest, trusted_artifacts=tuple(sealed),
+                   concepts=dict(concepts or manifest.concepts))
+
+
+@dataclass
+class IntegrityFinding:
+    path: str
+    role: str
+    expected: str
+    found: str
+    problem: str          # missing | modified
+
+
+def verify_trusted_artifacts(manifest: BuildManifest,
+                             folder: Path | str) -> list[IntegrityFinding]:
+    """
+    Whether every trusted artifact is still the one the plan was sealed around.
+
+    Returns what is wrong, and an empty list when nothing is. It does not look
+    at what a file contains or which identifiers appear in it: a file whose
+    hash matches is the trusted file, and a file whose hash does not is not,
+    whatever it has been made to look like.
+    """
+    folder = Path(folder)
+    findings: list[IntegrityFinding] = []
+    for artifact in manifest.trusted_artifacts:
+        path = folder / artifact.path
+        if not path.exists():
+            findings.append(IntegrityFinding(artifact.path, artifact.role,
+                                             artifact.sha256, "", "missing"))
+            continue
+        found = file_hash(path)
+        if found != artifact.sha256:
+            findings.append(IntegrityFinding(artifact.path, artifact.role,
+                                             artifact.sha256, found, "modified"))
+    return findings

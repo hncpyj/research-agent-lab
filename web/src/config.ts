@@ -1,4 +1,4 @@
-const fallbackAppUrl = 'https://researchagentlab-backend-production.up.railway.app';
+const fallbackAppUrl = 'https://app.researchagentlab.com';
 
 export const APP_URL = (import.meta.env.VITE_APP_URL || fallbackAppUrl).replace(/\/$/, '');
 

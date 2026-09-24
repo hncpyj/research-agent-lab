@@ -10,26 +10,26 @@
 /* ── Reset & Base ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg-0: #0d1117;
-  --bg-1: #161b22;
-  --bg-2: #21262d;
-  --bg-3: #30363d;
-  --border: #30363d;
-  --text-0: #e6edf3;
-  --text-1: #8b949e;
-  --text-2: #6e7681;
-  --accent: #7c3aed;
-  --accent-2: #9f5ffc;
-  --accent-bg: rgba(124,58,237,0.12);
-  --green: #3fb950;
-  --yellow: #d29922;
-  --red: #f85149;
-  --blue: #58a6ff;
-  --cyan: #39d0d8;
+  --bg-0: #f7f8fc;
+  --bg-1: #ffffff;
+  --bg-2: #f0f2f7;
+  --bg-3: #e4e8ef;
+  --border: #dfe3ea;
+  --text-0: #0f1117;
+  --text-1: #4a5168;
+  --text-2: #6b7280;
+  --accent: #0aaa90;
+  --accent-2: #078a76;
+  --accent-bg: rgba(10,170,144,0.10);
+  --green: #14866f;
+  --yellow: #a66b12;
+  --red: #c3443e;
+  --blue: #356fae;
+  --cyan: #168a96;
   --sidebar-w: 280px;
   --nav-h: 58px;
   --radius: 8px;
-  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  --shadow: 0 8px 30px rgba(15,17,23,0.10);
 }
 html, body { height: 100%; }
 body {
@@ -174,11 +174,11 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .notice b { color: var(--text-0); }
 
 /* sign-in */
-#login-screen {
+#login-screen, #account-screen {
   position: fixed; inset: 0; background: var(--bg-0); z-index: 500;
   display: none; align-items: center; justify-content: center; padding: 24px;
 }
-#login-screen.open { display: flex; }
+#login-screen.open, #account-screen.open { display: flex; }
 .login-box {
   width: 100%; max-width: 380px; background: var(--bg-1); border: 1px solid var(--border);
   border-radius: 12px; padding: 28px; display: grid; gap: 14px;
@@ -398,7 +398,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
   color: var(--accent-2);
   animation: phase-pulse 2s infinite;
 }
-@keyframes phase-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(124,58,237,.4);} 50%{box-shadow:0 0 0 6px rgba(124,58,237,0);} }
+@keyframes phase-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(10,170,144,.34);} 50%{box-shadow:0 0 0 6px rgba(10,170,144,0);} }
 .phase-step.done .phase-circle {
   background: rgba(63,185,80,0.15);
   border-color: var(--green);
@@ -444,8 +444,8 @@ input:focus, textarea:focus { border-color: var(--accent); }
 /* Waiting for input banner */
 #input-banner {
   display: none;
-  background: linear-gradient(135deg, rgba(124,58,237,0.15), rgba(57,208,216,0.08));
-  border: 1px solid rgba(124,58,237,0.4);
+  background: linear-gradient(135deg, rgba(10,170,144,0.12), rgba(22,138,150,0.06));
+  border: 1px solid rgba(10,170,144,0.32);
   border-radius: var(--radius);
   margin: 16px 24px 0;
   padding: 14px 18px;
@@ -826,7 +826,7 @@ pre {
   white-space: pre-wrap;
   word-break: break-all;
 }
-.run-output.run-output-err { color: #ff9898; background: rgba(248,81,73,0.05); }
+.run-output.run-output-err { color: var(--red); background: rgba(195,68,62,0.06); }
 .run-metrics {
   margin-top: 10px;
   padding: 8px 10px;
@@ -1131,7 +1131,7 @@ pre {
 .quality-injection-banner {
   display: flex; gap: 10px; align-items: flex-start;
   padding: 10px 14px; margin-bottom: 14px; border-radius: 5px;
-  background: rgba(200,80,80,.15); border: 1px solid #c85050; color: #e8a0a0;
+  background: rgba(200,80,80,.10); border: 1px solid #c85050; color: #9f3232;
   font-size: 12px; line-height: 1.5;
 }
 .quality-ledger-row {
@@ -1313,7 +1313,7 @@ pre {
 /* Cost card */
 .cost-card {
   background: var(--accent-bg);
-  border: 1px solid rgba(124,58,237,0.3);
+  border: 1px solid rgba(10,170,144,0.28);
   border-radius: var(--radius);
   padding: 14px 18px;
   display: flex;
@@ -1496,6 +1496,33 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
   </form>
 </div>
 
+<!-- Account bootstrap/sign-in. A shared access token, when configured, is a
+     separate private-server door and is not a user credential. -->
+<div id="account-screen">
+  <form class="login-box" onsubmit="submitAccount(event)">
+    <h1 id="account-title">Create owner account</h1>
+    <p id="account-intro">Create the first account for this private server.</p>
+    <div class="field" id="account-email-wrap" style="max-width:none;margin:0">
+      <label for="account-email" data-i18n="account.email">Email</label>
+      <input id="account-email" type="email" autocomplete="username" required spellcheck="false">
+    </div>
+    <div class="field" id="account-password-wrap" style="max-width:none;margin:0">
+      <label for="account-password" data-i18n="account.password">Password</label>
+      <input id="account-password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+      <span class="help" data-i18n="account.passwordHelp">Use 12–128 characters with uppercase, lowercase, a number, and a symbol.</span>
+    </div>
+    <div class="field" id="account-confirm-wrap" style="max-width:none;margin:0;display:none">
+      <label for="account-confirm" data-i18n="account.confirmPassword">Confirm password</label>
+      <input id="account-confirm" type="password" autocomplete="new-password" minlength="12" maxlength="128">
+    </div>
+    <div class="login-error" id="account-error"></div>
+    <button class="btn-primary" id="account-submit" type="submit" style="justify-content:center">Create owner account</button>
+    <button type="button" id="account-resend" class="btn-secondary" style="justify-content:center;display:none" onclick="resendVerification()">Resend verification email</button>
+    <button type="button" id="account-forgot" class="btn-secondary" style="justify-content:center;display:none" onclick="showAccount('forgot')">Forgot password?</button>
+    <button type="button" id="account-switch" class="btn-secondary" style="justify-content:center" onclick="switchAccountMode()"></button>
+  </form>
+</div>
+
 <div id="app">
 
   <!-- Navbar -->
@@ -1518,12 +1545,12 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
     </div>
     <button class="btn-secondary btn-sm" id="btn-logout" onclick="logout()" data-i18n="nav.logout"
             style="display:none;margin-right:8px">Sign out</button>
-    <div id="api-toggle-wrap" title="Toggle Anthropic API usage" style="display:flex;align-items:center;gap:8px;margin-right:8px;cursor:pointer" onclick="toggleApi()">
-      <span id="api-toggle-label" style="font-size:11px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--text-2)">API</span>
+    <div id="api-toggle-wrap" title="Toggle model API usage for this session" style="display:flex;align-items:center;gap:8px;margin-right:8px;cursor:pointer" onclick="toggleApi()">
+      <span id="api-toggle-label" style="font-size:11px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--text-2)">Model API</span>
       <div id="api-toggle-track" style="width:36px;height:20px;border-radius:10px;background:var(--bg-3);position:relative;transition:background .2s">
         <div id="api-toggle-thumb" style="width:14px;height:14px;border-radius:50%;background:#888;position:absolute;top:3px;left:3px;transition:left .2s,background .2s"></div>
       </div>
-      <span id="api-spend" title="Anthropic API spend today" style="font-size:11px;color:var(--text-2);margin-left:6px"></span>
+      <span id="api-spend" title="Model API spend today" style="font-size:11px;color:var(--text-2);margin-left:6px"></span>
     </div>
     <button class="btn-primary" onclick="openNewSessionModal()">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -1897,7 +1924,27 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
       <p data-i18n-html="settings.lede"></p>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="account-settings-panel">
+      <h2 data-i18n="accountSettings.title">Account</h2>
+      <p class="hint" id="account-settings-summary">—</p>
+      <div class="field">
+        <label for="current-password" data-i18n="accountSettings.current">Current password</label>
+        <input id="current-password" type="password" autocomplete="current-password" maxlength="128">
+      </div>
+      <div class="field">
+        <label for="new-password" data-i18n="accountSettings.new">New password</label>
+        <input id="new-password" type="password" autocomplete="new-password" minlength="12" maxlength="128">
+        <span class="help" data-i18n="account.passwordHelp"></span>
+      </div>
+      <div class="field">
+        <label for="new-password-confirm" data-i18n="account.confirmPassword">Confirm password</label>
+        <input id="new-password-confirm" type="password" autocomplete="new-password" minlength="12" maxlength="128">
+      </div>
+      <button class="btn-primary btn-sm" onclick="changeAccountPassword()" data-i18n="accountSettings.change">Change password</button>
+      <div class="hint" id="account-password-result" style="margin-top:10px"></div>
+    </div>
+
+    <div class="panel" id="access-token-panel">
       <h2 data-i18n="tokens.title">Access tokens</h2>
       <p class="hint" data-i18n="tokens.hint"></p>
       <div id="token-open-notice"></div>
@@ -1936,7 +1983,7 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
       <p class="hint" data-i18n="models.hint"></p>
       <div class="row-item" style="margin-bottom:12px">
         <div class="grow">
-          <div class="t" data-i18n="models.paidApi">Paid API</div>
+          <div class="t" data-i18n="models.paidApi">Model API</div>
           <div class="m" id="settings-api-state">—</div>
         </div>
         <button class="btn-secondary btn-sm" onclick="toggleApi()" data-i18n="models.toggle">Toggle</button>
@@ -2163,6 +2210,37 @@ en: {
   'login.rejected': 'That token does not work.',
   'login.unreachable': 'Could not reach the server.',
 
+  'account.ownerTitle': 'Create owner account',
+  'account.ownerIntro': 'Create the first account for this private server. It will own the research stored here.',
+  'account.loginTitle': 'Sign in to your account',
+  'account.loginIntro': 'Sign in to your ResearchAgentLab account.',
+  'account.signupTitle': 'Create your account',
+  'account.signupIntro': 'Create an account, then verify your email before signing in.',
+  'account.forgotTitle': 'Reset your password',
+  'account.forgotIntro': 'Enter your email. If an account exists, we will send a one-time reset link.',
+  'account.resetTitle': 'Choose a new password',
+  'account.resetIntro': 'The reset link is single-use and expires after 30 minutes.',
+  'account.verifyTitle': 'Verifying your email',
+  'account.verifyIntro': 'Please wait while the verification link is checked.',
+  'account.noticeTitle': 'Check your email',
+  'account.email': 'Email',
+  'account.password': 'Password',
+  'account.confirmPassword': 'Confirm password',
+  'account.passwordHelp': 'Use 12–128 characters with uppercase, lowercase, a number, and a symbol. Do not include your email name.',
+  'account.create': 'Create owner account',
+  'account.createMember': 'Create account',
+  'account.signIn': 'Sign in',
+  'account.sendReset': 'Send reset link',
+  'account.sending': 'Sending…',
+  'account.resetPassword': 'Reset password',
+  'account.needAccount': 'Need an account? Create one',
+  'account.haveAccount': 'Already have an account? Sign in',
+  'account.backToSignIn': 'Back to sign in',
+  'account.passwordMismatch': 'The passwords do not match.',
+  'account.resend': 'Resend verification email',
+  'account.failed': 'Could not sign in.',
+  'account.unreachable': 'Could not reach the server.',
+
   'dash.title': 'Dashboard',
   'dash.lede': 'What is running, what is waiting for your decision, what it has cost today, and whether the data is backed up.',
   'dash.waiting.title': 'Waiting for you',
@@ -2224,6 +2302,12 @@ en: {
   'settings.title': 'Settings',
   'settings.lede': 'What you change here is written to a file and survives a restart. Read-only items come from <code>.env</code> and need a restart.',
 
+  'accountSettings.title': 'Account',
+  'accountSettings.current': 'Current password',
+  'accountSettings.new': 'New password',
+  'accountSettings.change': 'Change password',
+  'accountSettings.changed': 'Password changed. Other signed-in browsers have been signed out.',
+
   'tokens.title': 'Access tokens',
   'tokens.hint': 'If any token exists, this server asks for one. A new token is shown in full once and masked afterwards — you can reveal them one at a time.',
   'tokens.open': '<b>This server is open to anyone who can reach it.</b> There is no token, so it asks for none. That is fine on localhost; to open it from another device, make one below.',
@@ -2246,16 +2330,19 @@ en: {
   'tokens.deleted': 'Deleted',
 
   'models.title': 'Models and cost',
-  'models.hint': 'Which paid API to use and how much it may spend per day. Past the cap, calls go to the local model and the session records that as a critical degradation. 0 means no cap.',
-  'models.paidApi': 'Paid API',
+  'models.hint': 'Model API is stored per session. Hosted sessions use your selected BYOK provider when its key is saved; otherwise they use the shared free model. Turning it off makes model-dependent phases pause before any external request.',
+  'models.paidApi': 'Model API',
   'models.toggle': 'Toggle',
   'models.on': 'on',
-  'models.off': 'off — every stage runs on the local model',
+  'models.off': 'off — model-dependent phases pause before external inference',
+  'models.sharedFree': 'on — shared free {provider} / {model}',
+  'models.byok': 'on — your {provider} key / {model}',
+  'models.configured': 'on — {provider} / {model}',
   'models.noModel': '(no model chosen)',
   'models.provider': 'Provider',
   'models.noKey': ' — no key',
   'models.keySet': '{env} is set · <a href="{docs}" target="_blank" rel="noreferrer">pricing</a>',
-  'models.keyMissing': '<b>{env}</b> is not in .env. Choosing this provider sends every call to the local model.',
+  'models.keyMissing': 'No server key is configured for this provider. Hosted users without BYOK continue on the shared free model.',
   'models.serverUrl': 'Server address',
   'models.loadModels': 'Load model list',
   'models.serverHint': 'LM Studio, vLLM, llama.cpp\'s llama-server — anything that speaks the OpenAI protocol. Include the trailing <code>/v1</code>.',
@@ -2268,7 +2355,7 @@ en: {
   'models.budgetFromEnv': ' · this value comes from API_DAILY_BUDGET_USD in .env',
   'models.budgetFromPage': ' · saved on this page',
   'models.switched': 'Switched to {provider}',
-  'models.switchedNoKey': 'Switched to {provider} — no key, so it runs on the local model',
+  'models.switchedNoKey': 'Preferred BYOK provider set to {provider}; the shared free model remains active until you save your own key.',
   'models.switchFailed': 'Could not switch provider',
   'models.needNumber': 'Enter a number of 0 or more',
   'models.saved': 'Saved — {provider} / {model}',
@@ -2580,8 +2667,8 @@ en: {
   'stages.pathCommon': 'any session',
 
 
-  'api.enabled': 'Paid API enabled',
-  'api.disabled': 'Paid API disabled — local model only',
+  'api.enabled': 'Model API enabled',
+  'api.disabled': 'Model API disabled — no external model requests will be sent',
   'api.updateFailed': 'Failed to update the setting',
   'api.spendToday': '{spent} today',
   'api.spendOfCap': '{spent} / {cap} today',
@@ -2698,13 +2785,17 @@ document.addEventListener('DOMContentLoaded', () => {
 // The page is always served; what is behind it is not. If this server asks for
 // a token, everything else waits until one is accepted.
 let _locked = false;
+let _signupOpen = false;
+let _accountsExist = false;
 
 // One place catches "your token stopped working": every request in this page,
 // including the ones written before there was a login screen, goes through it.
 const _rawFetch = window.fetch.bind(window);
 window.fetch = async (...args) => {
   const response = await _rawFetch(...args);
-  if (response.status === 401 && !String(args[0]).includes('/api/login')) showLogin();
+  const path = String(args[0]);
+  const authenticationRequest = path.includes('/api/login') || path.includes('/api/auth/');
+  if (response.status === 401 && !authenticationRequest) startApp();
   return response;
 };
 
@@ -2715,20 +2806,94 @@ async function startApp() {
     state = await r.json();
   } catch(e) {}
   _locked = !!state.locked;
+  const accountEntryPath = [
+    '/login', '/signup', '/verify-email', '/forgot-password', '/reset-password'
+  ].includes(window.location.pathname);
   document.getElementById('btn-logout').style.display = _locked ? '' : 'none';
-  if (_locked && !state.signed_in) { showLogin(); return; }
+  // Account entry and recovery must remain reachable without the legacy shared
+  // UI token. Private application APIs are still protected server-side.
+  if (_locked && !state.signed_in && !accountEntryPath) { showLogin(); return; }
   hideLogin();
+
+  try {
+    const accountResponse = await fetch('/api/auth/me');
+    const account = await accountResponse.json();
+    _signupOpen = !!account.signup_open;
+    _accountsExist = !!account.accounts;
+    document.getElementById('btn-logout').style.display = (_locked || account.user) ? '' : 'none';
+    if (window.location.pathname === '/verify-email') { completeEmailVerification(); return; }
+    if (window.location.pathname === '/reset-password') { showAccount('reset'); return; }
+    if (window.location.pathname === '/forgot-password') { showAccount('forgot'); return; }
+    if (!account.accounts) { showAccount('signup'); return; }
+    if (!account.user) {
+      const requestedSignup = window.location.pathname === '/signup';
+      showAccount(requestedSignup && _signupOpen ? 'signup' : 'login');
+      return;
+    }
+  } catch(e) {
+    showAccount('login');
+    return;
+  }
+  hideAccount();
   loadProjects();
   loadSessions();
   loadApiSetting();
 }
 
 function showLogin() {
+  hideAccount();
   document.getElementById('login-screen').classList.add('open');
   setTimeout(() => document.getElementById('login-token').focus(), 80);
 }
 function hideLogin() {
   document.getElementById('login-screen').classList.remove('open');
+}
+
+let _accountMode = 'signup';
+function showAccount(mode, message = '') {
+  _accountMode = ['login', 'signup', 'forgot', 'reset', 'verify', 'notice'].includes(mode) ? mode : 'login';
+  hideLogin();
+  const signup = _accountMode === 'signup';
+  const firstAccount = signup && !_accountsExist;
+  const titles = {login: 'account.loginTitle', signup: firstAccount ? 'account.ownerTitle' : 'account.signupTitle', forgot: 'account.forgotTitle', reset: 'account.resetTitle', verify: 'account.verifyTitle', notice: 'account.noticeTitle'};
+  const intros = {login: 'account.loginIntro', signup: firstAccount ? 'account.ownerIntro' : 'account.signupIntro', forgot: 'account.forgotIntro', reset: 'account.resetIntro', verify: 'account.verifyIntro'};
+  const emailWrap = document.getElementById('account-email-wrap');
+  const passwordWrap = document.getElementById('account-password-wrap');
+  const confirmWrap = document.getElementById('account-confirm-wrap');
+  const email = document.getElementById('account-email');
+  const password = document.getElementById('account-password');
+  const confirm = document.getElementById('account-confirm');
+  const submit = document.getElementById('account-submit');
+  document.getElementById('account-title').textContent = t(titles[_accountMode]);
+  document.getElementById('account-intro').textContent = message || t(intros[_accountMode] || 'account.loginIntro');
+  emailWrap.style.display = ['login', 'signup', 'forgot'].includes(_accountMode) ? '' : 'none';
+  passwordWrap.style.display = ['login', 'signup', 'reset'].includes(_accountMode) ? '' : 'none';
+  confirmWrap.style.display = ['signup', 'reset'].includes(_accountMode) ? '' : 'none';
+  email.required = emailWrap.style.display !== 'none';
+  password.required = passwordWrap.style.display !== 'none';
+  confirm.required = confirmWrap.style.display !== 'none';
+  password.autocomplete = ['signup', 'reset'].includes(_accountMode) ? 'new-password' : 'current-password';
+  const submitLabels = {login: 'account.signIn', signup: firstAccount ? 'account.create' : 'account.createMember', forgot: 'account.sendReset', reset: 'account.resetPassword'};
+  submit.style.display = submitLabels[_accountMode] ? '' : 'none';
+  if (submitLabels[_accountMode]) submit.textContent = t(submitLabels[_accountMode]);
+  const switcher = document.getElementById('account-switch');
+  const canSwitchSignup = _accountsExist && _signupOpen && ['login', 'signup'].includes(_accountMode);
+  switcher.style.display = canSwitchSignup || ['forgot', 'reset', 'verify', 'notice'].includes(_accountMode) ? '' : 'none';
+  switcher.textContent = t(['forgot', 'reset', 'verify', 'notice'].includes(_accountMode) ? 'account.backToSignIn' : (signup ? 'account.haveAccount' : 'account.needAccount'));
+  document.getElementById('account-forgot').style.display = _accountMode === 'login' ? '' : 'none';
+  document.getElementById('account-resend').style.display = 'none';
+  document.getElementById('account-error').textContent = '';
+  document.getElementById('account-screen').classList.add('open');
+  const focusTarget = emailWrap.style.display !== 'none' ? email : password;
+  if (focusTarget && submit.style.display !== 'none') setTimeout(() => focusTarget.focus(), 80);
+}
+function switchAccountMode() {
+  const next = _accountMode === 'login' ? 'signup' : 'login';
+  history.replaceState({}, '', next === 'signup' ? '/signup' : '/login');
+  showAccount(next);
+}
+function hideAccount() {
+  document.getElementById('account-screen').classList.remove('open');
 }
 
 async function submitLogin(event) {
@@ -2747,16 +2912,116 @@ async function submitLogin(event) {
   } catch(e) { err.textContent = t('login.unreachable'); }
 }
 
+async function submitAccount(event) {
+  event.preventDefault();
+  const email = document.getElementById('account-email');
+  const password = document.getElementById('account-password');
+  const confirm = document.getElementById('account-confirm');
+  const err = document.getElementById('account-error');
+  const submit = document.getElementById('account-submit');
+  err.textContent = '';
+  if (['signup', 'reset'].includes(_accountMode) && password.value !== confirm.value) {
+    err.textContent = t('account.passwordMismatch');
+    confirm.select();
+    return;
+  }
+  const submitLabel = submit.textContent;
+  submit.disabled = true;
+  submit.textContent = t('account.sending');
+  try {
+    const endpoint = _accountMode === 'signup' ? '/api/auth/signup' :
+      (_accountMode === 'forgot' ? '/api/auth/password/forgot' :
+      (_accountMode === 'reset' ? '/api/auth/password/reset' : '/api/auth/login'));
+    const body = _accountMode === 'forgot' ? {email: email.value.trim()} :
+      (_accountMode === 'reset' ? {token: authHashToken(), password: password.value} :
+      {email: email.value.trim(), password: password.value});
+    const r = await fetch(endpoint, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) {
+      let detail = t('account.failed');
+      try { detail = (await r.json()).detail || detail; } catch(e) {}
+      err.textContent = detail;
+      if (_accountMode === 'login' && r.status === 403) {
+        document.getElementById('account-resend').style.display = '';
+      }
+      if (password.offsetParent !== null) password.select();
+      return;
+    }
+    const result = await r.json();
+    if (['signup', 'forgot'].includes(_accountMode)) {
+      password.value = '';
+      confirm.value = '';
+      history.replaceState({}, '', '/login');
+      showAccount('notice', result.message);
+      return;
+    }
+    email.value = '';
+    password.value = '';
+    confirm.value = '';
+    history.replaceState({}, '', '/app');
+    hideAccount();
+    startApp();
+  } catch(e) { err.textContent = t('account.unreachable'); }
+  finally {
+    submit.disabled = false;
+    submit.textContent = submitLabel;
+  }
+}
+
+function authHashToken() {
+  return new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') || '';
+}
+
+async function completeEmailVerification() {
+  showAccount('verify');
+  const token = authHashToken();
+  const err = document.getElementById('account-error');
+  if (!token) { err.textContent = 'The verification link is incomplete.'; return; }
+  try {
+    const r = await fetch('/api/auth/verify', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token})
+    });
+    if (!r.ok) {
+      let detail = t('account.failed');
+      try { detail = (await r.json()).detail || detail; } catch(e) {}
+      err.textContent = detail;
+      return;
+    }
+    history.replaceState({}, '', '/app');
+    hideAccount();
+    startApp();
+  } catch(e) { err.textContent = t('account.unreachable'); }
+}
+
+async function resendVerification() {
+  const email = document.getElementById('account-email').value.trim();
+  const err = document.getElementById('account-error');
+  if (!email) { err.textContent = 'Enter your email first.'; return; }
+  try {
+    const r = await fetch('/api/auth/resend-verification', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email})
+    });
+    const result = await r.json();
+    if (!r.ok) { err.textContent = result.detail || t('account.failed'); return; }
+    showAccount('notice', result.message);
+  } catch(e) { err.textContent = t('account.unreachable'); }
+}
+
 async function logout() {
-  try { await fetch('/api/logout', {method: 'POST'}); } catch(e) {}
-  showLogin();
+  try { await _rawFetch('/api/auth/logout', {method: 'POST'}); } catch(e) {}
+  try { await _rawFetch('/api/logout', {method: 'POST'}); } catch(e) {}
+  window.location.assign('/login');
 }
 
 /** Every fetch for a signed-in page goes through here, so an expired session
     shows the sign-in screen instead of an empty page. */
 async function api(path, options) {
   const r = await fetch(path, options);
-  if (r.status === 401) { showLogin(); throw new Error('unauthorised'); }
+  if (r.status === 401) { await startApp(); throw new Error('unauthorised'); }
   return r;
 }
 
@@ -2767,7 +3032,7 @@ const VIEWS = {
   research:  {el: 'body',           load: null},
   dashboard: {el: 'view-dashboard', load: () => loadDashboard()},
   manage:    {el: 'view-manage',    load: async () => { await loadProjects(); loadManage(); loadBackups(); }},
-  settings:  {el: 'view-settings',  load: () => { loadTokens(); loadApiKeys(); loadSettingsPanel(); loadLocalModels(); loadEnvironment(); }},
+  settings:  {el: 'view-settings',  load: () => { loadAccountSettings(); loadTokens(); loadApiKeys(); loadSettingsPanel(); loadLocalModels(); loadEnvironment(); }},
 };
 
 function showView(name) {
@@ -3073,8 +3338,42 @@ async function makeBackup() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Settings: tokens, budget, environment
+// Settings: account, tokens, budget, environment
 // ──────────────────────────────────────────────────────────────────────────────
+async function loadAccountSettings() {
+  try {
+    const r = await api('/api/auth/me');
+    const state = await r.json();
+    const panel = document.getElementById('account-settings-panel');
+    const tokenPanel = document.getElementById('access-token-panel');
+    panel.style.display = state.user ? '' : 'none';
+    tokenPanel.style.display = state.accounts ? 'none' : '';
+    if (state.user) {
+      const verified = state.user.email_verified ? 'verified' : 'not verified';
+      document.getElementById('account-settings-summary').textContent = `${state.user.email} · ${verified}`;
+    }
+  } catch(e) {}
+}
+
+async function changeAccountPassword() {
+  const current = document.getElementById('current-password');
+  const next = document.getElementById('new-password');
+  const confirm = document.getElementById('new-password-confirm');
+  const result = document.getElementById('account-password-result');
+  result.textContent = '';
+  if (next.value !== confirm.value) { result.textContent = t('account.passwordMismatch'); return; }
+  try {
+    const r = await api('/api/auth/password/change', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({current_password: current.value, new_password: next.value})
+    });
+    const body = await r.json();
+    if (!r.ok) { result.textContent = body.detail || t('common.saveFailed'); return; }
+    current.value = next.value = confirm.value = '';
+    result.textContent = t('accountSettings.changed');
+  } catch(e) { result.textContent = t('common.saveFailed'); }
+}
+
 async function loadTokens() {
   let d;
   try { d = await (await api('/api/access/tokens')).json(); } catch(e) { return; }
@@ -3210,17 +3509,41 @@ async function deleteApiKey(provider, label) {
 
 let _providers = [];
 
+function _settingsUrl() {
+  return '/api/settings' + (state.currentId ? '?session_id=' + encodeURIComponent(state.currentId) : '');
+}
+
+function _sessionSettingsBody(values) {
+  return Object.assign({}, values, state.currentId ? {session_id: state.currentId} : {});
+}
+
 async function loadSettingsPanel() {
   let d;
-  try { d = await (await api('/api/settings')).json(); } catch(e) { return; }
+  try { d = await (await api(_settingsUrl())).json(); } catch(e) { return; }
   _providers = d.providers || [];
   _renderApiToggle(d.use_api);
   _renderSpend(d);
 
   const current = _providers.find(p => p.name === d.api_provider) || {};
-  document.getElementById('settings-api-state').textContent =
-    (d.use_api ? t('models.on') : t('models.off')) +
-    (d.use_api ? ' — ' + (current.label || d.api_provider) + ' / ' + (d.api_model || t('models.noModel')) : '');
+  const effective = _providers.find(p => p.name === d.effective_provider) || {};
+  let routeText = t('models.off');
+  if (d.use_api && d.inference_mode === 'shared_free') {
+    routeText = t('models.sharedFree', {
+      provider: effective.label || d.effective_provider,
+      model: d.effective_model || t('models.noModel')
+    });
+  } else if (d.use_api && d.inference_mode === 'byok') {
+    routeText = t('models.byok', {
+      provider: current.label || d.api_provider,
+      model: d.effective_model || d.api_model || t('models.noModel')
+    });
+  } else if (d.use_api) {
+    routeText = t('models.configured', {
+      provider: effective.label || current.label || d.effective_provider || d.api_provider,
+      model: d.effective_model || d.api_model || t('models.noModel')
+    });
+  }
+  document.getElementById('settings-api-state').textContent = routeText;
 
   const select = document.getElementById('provider-select');
   select.innerHTML = _providers.map(p =>
@@ -3257,15 +3580,16 @@ async function loadSettingsPanel() {
 async function changeProvider() {
   const name = document.getElementById('provider-select').value;
   try {
-    await api('/api/settings', {
+    const r = await api('/api/settings', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({api_provider: name})
+      body: JSON.stringify(_sessionSettingsBody({api_provider: name}))
     });
+    const d = await r.json();
     await loadSettingsPanel();
     const p = _providers.find(x => x.name === name) || {};
     const label = p.label || name;
-    toast(p.key_set || p.configurable_url ? t('models.switched', {provider: label})
-                                          : t('models.switchedNoKey', {provider: label}), 'info');
+    toast(d.inference_mode === 'shared_free' ? t('models.switchedNoKey', {provider: label})
+                                             : t('models.switched', {provider: label}), 'info');
   } catch(e) { toast(t('models.switchFailed'), 'error'); }
 }
 
@@ -3300,6 +3624,7 @@ async function saveModelSettings() {
     api_provider: document.getElementById('provider-select').value,
     api_model: document.getElementById('model-input').value.trim(),
   };
+  if (state.currentId) body.session_id = state.currentId;
   if (!document.getElementById('server-url-field').hidden) {
     body.local_server_url = document.getElementById('server-url-input').value.trim();
   }
@@ -3461,7 +3786,7 @@ function _renderSpend(d) {
 
 async function loadApiSetting() {
   try {
-    const r = await fetch('/api/settings');
+    const r = await fetch(_settingsUrl());
     const d = await r.json();
     _renderApiToggle(d.use_api);
     _renderSpend(d);
@@ -3474,7 +3799,7 @@ async function toggleApi() {
     const r = await fetch('/api/settings', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({use_api: next})
+      body: JSON.stringify(_sessionSettingsBody({use_api: next}))
     });
     const d = await r.json();
     _renderApiToggle(d.use_api);
@@ -3553,6 +3878,7 @@ async function openSession(sessionId) {
     const r = await fetch(`/api/sessions/${sessionId}`);
     const data = await r.json();
     applySessionData(data);
+    await loadApiSetting();
   } catch(e) {
     toast(t('app.loadSessionFailed'), 'error');
   }
@@ -5388,7 +5714,7 @@ async function generateReport() {
   // Query backend to show the right hint before generation starts
   let hint = t('report.slowLoad');
   try {
-    const bs = await fetch('/api/report-backend-status');
+    const bs = await fetch('/api/report-backend-status?session_id=' + encodeURIComponent(sessionId));
     if (bs.ok) {
       const bsData = await bs.json();
       if (!bsData.api_key_configured) {

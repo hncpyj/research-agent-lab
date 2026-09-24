@@ -68,7 +68,7 @@ def test_the_session_is_told_why_it_stopped(db):
 
 def test_the_allowance_place_is_given_back_and_not_charged(db):
     """The whole reason this exists: a restart must not cost the user a run."""
-    user = accounts.create_user("owner@example.com", "a-good-password")
+    user = accounts.create_user("owner@example.com", "Good!Password123")
     store, sid = _a_session()
     run_id = quota.reserve(user, session_id=sid, stage="full")
     quota.start(run_id, sid)

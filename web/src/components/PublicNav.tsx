@@ -1,5 +1,8 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useState } from 'react';
+import { hostedAppUrl } from '../config';
+
+const repositoryUrl = 'https://github.com/hncpyj/research-agent-lab';
 
 const links = [
   { to: '/features', label: 'Architecture' },
@@ -30,9 +33,14 @@ export default function PublicNav() {
           ))}
         </div>
 
-        <a href="https://github.com/hncpyj/research-agent-lab" target="_blank" rel="noopener noreferrer" className="hidden md:inline-flex text-sm px-4 py-1.5 rounded font-medium" style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>
-          View on GitHub
-        </a>
+        <div className="hidden md:flex items-center gap-2">
+          <a href={hostedAppUrl('/login')} className="text-sm px-3 py-1.5 rounded font-medium" style={{ color: 'var(--foreground)' }}>Sign in</a>
+          <a href={hostedAppUrl('/signup')} className="text-sm px-3 py-1.5 rounded font-medium" style={{ color: 'var(--muted-foreground)' }}>Try beta</a>
+          <a href={repositoryUrl} target="_blank" rel="noopener noreferrer" className="text-sm px-4 py-2 rounded font-semibold inline-flex items-center gap-2" style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>
+            <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .7A11.5 11.5 0 0 0 8.36 23c.58.1.79-.25.79-.56v-2.02c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.04 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.29-5.27-5.72 0-1.26.45-2.3 1.19-3.1-.12-.3-.52-1.48.11-3.07 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.77.11 3.06.74.82 1.19 1.85 1.19 3.11 0 4.45-2.71 5.43-5.29 5.72.42.36.79 1.06.79 2.14v3.18c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z" /></svg>
+            GitHub
+          </a>
+        </div>
 
         <button type="button" className="md:hidden p-2" onClick={() => setOpen(value => !value)} aria-label={open ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={open} aria-controls="mobile-navigation" style={{ color: 'var(--muted-foreground)' }}>
           <svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -48,9 +56,9 @@ export default function PublicNav() {
           {links.map(link => (
             <Link key={link.to} to={link.to} className="text-sm" style={{ color: 'var(--muted-foreground)' }} onClick={() => setOpen(false)}>{link.label}</Link>
           ))}
-          <a href="https://github.com/hncpyj/research-agent-lab" target="_blank" rel="noopener noreferrer" className="text-sm px-4 py-2 rounded font-medium text-center" style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>
-            View on GitHub
-          </a>
+          <a href={hostedAppUrl('/login')} className="text-sm px-4 py-2 rounded font-medium text-center border" style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}>Sign in</a>
+          <a href={hostedAppUrl('/signup')} className="text-sm px-4 py-2 rounded font-medium text-center border" style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}>Try beta</a>
+          <a href={repositoryUrl} target="_blank" rel="noopener noreferrer" className="text-sm px-4 py-2 rounded font-semibold text-center" style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>View GitHub repository</a>
         </div>
       )}
     </nav>

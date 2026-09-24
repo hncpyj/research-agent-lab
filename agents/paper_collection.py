@@ -46,12 +46,17 @@ class PaperCollectionAgent:
         vector_db: "VectorDB",
         note_db: "NoteDB",
         top_k: int = config.ARXIV_TOP_K,
+        keyword_model=None,
+        allow_lexical_ranking: bool = False,
     ) -> None:
         self._local = local_model
+        self._keyword_model = keyword_model if keyword_model is not None else local_model
         self._embed = embed_model
         self._vdb = vector_db
         self._ndb = note_db
         self._top_k = top_k
+        self._allow_lexical_ranking = allow_lexical_ranking
+        self._last_ranking_backend = ""
         self._fetcher = ArxivFetcher()
         self._deg = None  # set per-run in run(); see agents/degradation.py
 
@@ -111,9 +116,13 @@ class PaperCollectionAgent:
             logger.warning("No papers found for topic: %s", topic)
             return []
 
-        # Step 3: embed & store in ChromaDB
-        console.print("  Embedding papers…")
-        self._embed_and_store(all_papers, session_id)
+        # Step 3: embed & store in ChromaDB when a real backend exists. Hosted
+        # TF-IDF ranking does not manufacture vectors just to satisfy this API.
+        if getattr(self._embed, "is_loaded", True):
+            console.print("  Embedding papers…")
+            self._embed_and_store(all_papers, session_id)
+        elif self._allow_lexical_ranking:
+            console.print("  No embedding backend configured; using TF-IDF ranking.")
 
         # Step 4: select top-K by query similarity (canon papers always survive)
         top_papers = self._select_top_k(topic, all_papers, must_include_ids=canon_ids)
@@ -152,10 +161,50 @@ class PaperCollectionAgent:
         cleaned = _re.sub(r'\*+', '', cleaned).strip()
         return cleaned[:max_len]
 
+    @staticmethod
+    def _fallback_keywords(safe_topic: str) -> list[str]:
+        """Build three deterministic, distinct queries without fabricating text."""
+        stopwords = {
+            "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
+            "how", "in", "is", "of", "on", "or", "that", "the", "to", "with",
+        }
+        words: list[str] = []
+        seen: set[str] = set()
+        for word in re.findall(r"[A-Za-z0-9][A-Za-z0-9+.-]*", safe_topic.lower()):
+            key = word.strip(".-")
+            if not key or key in stopwords or key in seen:
+                continue
+            seen.add(key)
+            words.append(key)
+
+        if not words:
+            return ["research methods", "research survey", "research review"]
+
+        candidates = [
+            words[:6],
+            (words[:3] + words[-3:]) if len(words) > 3 else words + ["survey"],
+            words[1::2][:6] if len(words) > 2 else words + ["review"],
+        ]
+        suffixes = ("", "survey", "review")
+        queries: list[str] = []
+        used: set[str] = set()
+        for index, candidate in enumerate(candidates):
+            query_words = list(candidate[:10])
+            query = " ".join(query_words).strip()
+            if not query or query.casefold() in used:
+                suffix = suffixes[index] or "methods"
+                query = " ".join((words[:9] + [suffix])[:10]).strip()
+            if query.casefold() in used:
+                query = " ".join((words[:8] + ["research", str(index + 1)])[:10])
+            used.add(query.casefold())
+            queries.append(query[:80].rstrip())
+        return queries
+
     def _extract_keywords(self, topic: str) -> list[str]:
-        """Use local model to generate 3 English search keyword variants."""
+        """Generate search queries, with a deterministic non-duplicating fallback."""
         # Ensure the topic itself is ASCII-safe before sending to LLM or arXiv
         safe_topic = self._ascii_safe(topic, max_len=200)
+        fallback = self._fallback_keywords(safe_topic)
 
         prompt = (
             "You are a research assistant. Given a research topic, generate "
@@ -171,11 +220,22 @@ class PaperCollectionAgent:
             '"attention mechanism RL benchmark"]'
         )
 
-        if self._local and self._local.is_loaded:
-            raw = self._local.generate(prompt, temperature=0.1)
-        else:
-            # fallback: simple split
-            raw = f'["{safe_topic}", "{safe_topic} survey", "{safe_topic} deep learning"]'
+        raw = ""
+        keyword_model = getattr(self, "_keyword_model", getattr(self, "_local", None))
+        model_failure_recorded = False
+        if keyword_model is not None and getattr(keyword_model, "is_loaded", True):
+            try:
+                raw = keyword_model.generate(prompt, temperature=0.1)
+            except Exception as exc:
+                logger.warning("Keyword model unavailable; using deterministic fallback: %s", exc)
+                if self._deg:
+                    self._deg.record(
+                        1,
+                        "keyword_generation",
+                        "warn",
+                        f"Keyword model unavailable ({exc}); using deterministic lexical queries.",
+                    )
+                    model_failure_recorded = True
 
         # parse JSON array from response
         match = re.search(r'\[.*?\]', raw, re.DOTALL)
@@ -185,25 +245,45 @@ class PaperCollectionAgent:
                 keywords = json.loads(match.group())
                 if isinstance(keywords, list) and keywords:
                     # Sanitize every keyword: ASCII-only, short
-                    safe_kws = [
-                        self._ascii_safe(str(k), max_len=80)
-                        for k in keywords[:3]
-                        if str(k).strip()
-                    ]
-                    # Filter out empty or too-short keywords
-                    safe_kws = [k for k in safe_kws if len(k) > 3]
+                    safe_kws: list[str] = []
+                    seen: set[str] = set()
+                    for value in keywords:
+                        keyword = self._ascii_safe(str(value), max_len=80)
+                        keyword = " ".join(keyword.split()[:10])
+                        key = keyword.casefold()
+                        if len(keyword) <= 3 or key in seen:
+                            continue
+                        seen.add(key)
+                        safe_kws.append(keyword)
+                        if len(safe_kws) == 3:
+                            break
+                    for keyword in fallback:
+                        if len(safe_kws) == 3:
+                            break
+                        if keyword.casefold() not in seen:
+                            seen.add(keyword.casefold())
+                            safe_kws.append(keyword)
                     if safe_kws:
                         return safe_kws
             except Exception:
                 pass
 
         logger.warning("Keyword extraction fallback for topic: %s", safe_topic)
-        return [safe_topic, f"{safe_topic} survey", f"{safe_topic} deep learning"]
+        if self._deg and not raw and not model_failure_recorded:
+            self._deg.record(
+                1,
+                "keyword_generation",
+                "warn",
+                "No keyword model output was available; using deterministic lexical queries.",
+            )
+        return fallback
 
     def _embed_and_store(
         self, papers: list[PaperRecord], session_id: str
     ) -> None:
         """Embed each paper and upsert into ChromaDB."""
+        if not getattr(self._embed, "is_loaded", True):
+            return
         batch: list[dict] = []
         with Progress(
             SpinnerColumn(),
@@ -277,6 +357,12 @@ class PaperCollectionAgent:
             budget = max(self._top_k, len(canon_first))
             return combined[:budget]
 
+        if getattr(self, "_last_ranking_backend", "") == "lexical":
+            rest = [p for p in ranked if p.arxiv_id not in must_include_ids]
+            combined = canon_first + rest
+            budget = max(self._top_k, len(canon_first))
+            return combined[:budget]
+
         scored = [(p, s) for p, s in zip(ranked, sims) if p.arxiv_id not in must_include_ids]
         cutoff = (max(s for _, s in scored) - config.RELEVANCE_MARGIN) if scored else 0.0
         survivors = [p for p, s in scored if s >= cutoff]
@@ -313,9 +399,13 @@ class PaperCollectionAgent:
         """
         import numpy as np
 
+        self._last_ranking_backend = "embedding"
+
         try:
             topic_vec = np.asarray(self._embed.embed(topic), dtype=np.float32)
         except Exception as exc:
+            if getattr(self, "_allow_lexical_ranking", False):
+                return self._rank_all_lexical(topic, papers, f"topic embedding failed: {exc}")
             if self._deg:
                 self._deg.record(
                     1, "ranking", "critical",
@@ -325,6 +415,8 @@ class PaperCollectionAgent:
             return list(papers), None
 
         if float(np.linalg.norm(topic_vec)) < 1e-8:
+            if getattr(self, "_allow_lexical_ranking", False):
+                return self._rank_all_lexical(topic, papers, "embedding backend returned a zero vector")
             if self._deg:
                 self._deg.record(
                     1, "ranking", "critical",
@@ -347,6 +439,8 @@ class PaperCollectionAgent:
             vecs.append(v)
 
         if not keep:
+            if getattr(self, "_allow_lexical_ranking", False):
+                return self._rank_all_lexical(topic, papers, "no paper embeddings were usable")
             if self._deg:
                 self._deg.record(
                     1, "ranking", "critical",
@@ -371,6 +465,91 @@ class PaperCollectionAgent:
             ranked_sims.extend([0.0] * len(missing))
 
         return ranked, ranked_sims
+
+    @staticmethod
+    def _lexical_tokens(text: str) -> list[str]:
+        """Tokenize consistently for the hosted CPU-only relevance fallback."""
+        stopwords = {
+            "a", "an", "and", "are", "as", "at", "be", "been", "by", "for",
+            "from", "has", "have", "in", "is", "it", "of", "on", "or", "that",
+            "the", "this", "to", "was", "were", "with",
+        }
+        return [
+            token for token in re.findall(r"[a-z0-9][a-z0-9+-]*", text.lower())
+            if token not in stopwords and len(token) > 1
+        ]
+
+    def _rank_all_lexical(
+        self,
+        topic: str,
+        papers: list[PaperRecord],
+        reason: str,
+    ) -> tuple[list[PaperRecord], list[float] | None]:
+        """Rank with deterministic corpus TF-IDF when hosted embeddings are absent."""
+        from collections import Counter
+        import math
+
+        query_tokens = self._lexical_tokens(topic)
+        document_tokens = [self._lexical_tokens(p.embed_document) for p in papers]
+        if not query_tokens or not any(document_tokens):
+            if self._deg:
+                self._deg.record(
+                    1,
+                    "ranking",
+                    "critical",
+                    f"{reason}. Lexical ranking also lacked usable terms; papers are UNRANKED.",
+                )
+            self._last_ranking_backend = "unranked"
+            return list(papers), None
+
+        document_frequency: Counter[str] = Counter()
+        for tokens in document_tokens:
+            document_frequency.update(set(tokens))
+        count = len(document_tokens)
+        idf = {
+            token: math.log((1 + count) / (1 + frequency)) + 1.0
+            for token, frequency in document_frequency.items()
+        }
+
+        def vector(tokens: list[str]) -> dict[str, float]:
+            frequencies = Counter(tokens)
+            total = max(1, sum(frequencies.values()))
+            return {
+                token: (frequency / total) * idf.get(token, math.log(1 + count) + 1.0)
+                for token, frequency in frequencies.items()
+            }
+
+        def cosine(left: dict[str, float], right: dict[str, float]) -> float:
+            left_norm = math.sqrt(sum(value * value for value in left.values()))
+            right_norm = math.sqrt(sum(value * value for value in right.values()))
+            if left_norm <= 0 or right_norm <= 0:
+                return 0.0
+            shared = left.keys() & right.keys()
+            return sum(left[token] * right[token] for token in shared) / (left_norm * right_norm)
+
+        query_vector = vector(query_tokens)
+        scores = [cosine(query_vector, vector(tokens)) for tokens in document_tokens]
+        if not scores or max(scores) <= 0.0:
+            if self._deg:
+                self._deg.record(
+                    1,
+                    "ranking",
+                    "critical",
+                    f"{reason}. TF-IDF found no term overlap; papers are UNRANKED.",
+                )
+            self._last_ranking_backend = "unranked"
+            return list(papers), None
+
+        order = sorted(range(len(papers)), key=lambda index: (-scores[index], index))
+        self._last_ranking_backend = "lexical"
+        if self._deg:
+            self._deg.record(
+                1,
+                "ranking_backend",
+                "warn",
+                f"{reason}. Ranked papers with deterministic TF-IDF; no fake embeddings were generated.",
+            )
+        return [papers[index] for index in order], [scores[index] for index in order]
 
     def _download_pdfs(self, papers: list[PaperRecord]) -> None:
         """Download PDFs for selected arXiv papers; stop at the first block."""

@@ -79,6 +79,12 @@ class SelfBugFixAgent:
                 return fn(*args, **kwargs)
 
             except Exception as exc:
+                # Provider configuration, quota and an explicit Model API OFF
+                # are not software bugs. Retrying a whole phase would only
+                # repeat requests (or the same deterministic failure).
+                from models.api_model import InferenceUnavailable
+                if isinstance(exc, InferenceUnavailable):
+                    raise
                 last_exc = exc
                 tb = traceback.format_exc()
 

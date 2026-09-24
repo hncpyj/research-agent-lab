@@ -1,5 +1,5 @@
 """
-The paid backends a run can use: Anthropic, OpenAI, Gemini.
+The external model backends a run can use: Anthropic, OpenAI, Gemini.
 
 APIModel owns the things that must behave the same whichever backend answers —
 retries with the project's 20-30 s pacing, one cost-log row per call, the daily
@@ -21,7 +21,7 @@ import config
 
 logger = logging.getLogger(__name__)
 
-RETRY, NETWORK, FATAL = "retry", "network", "fatal"
+RETRY, NETWORK, FATAL, QUOTA, AUTH = "retry", "network", "fatal", "quota", "auth"
 
 
 class ProviderUnavailable(RuntimeError):
@@ -74,7 +74,8 @@ PROVIDERS: dict[str, ProviderInfo] = {
     "gemini": ProviderInfo(
         name="gemini", label="Google (Gemini)", key_env="GEMINI_API_KEY",
         default_model=config.GEMINI_MODEL,
-        models=["gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro"],
+        models=["gemini-3.5-flash-lite", "gemini-2.5-flash-lite",
+                "gemini-2.5-flash", "gemini-2.5-pro"],
         docs="https://ai.google.dev/gemini-api/docs/pricing"),
     # Anything else that speaks the same protocol: LM Studio, vLLM,
     # llama.cpp's llama-server, text-generation-webui, a proxy. The address is
@@ -138,8 +139,26 @@ class _Provider:
         raise NotImplementedError
 
     def classify(self, exc: Exception) -> str:
-        """RETRY (wait and try again), NETWORK (fall back to local), or FATAL."""
+        """Classify transport, quota, authentication, or fatal request errors."""
         raise NotImplementedError
+
+
+def anthropic_request_kwargs(model: str, system: str, messages: list[dict],
+                             max_tokens: int, temperature: float) -> dict:
+    """Build the exact keyword arguments passed to ``messages.create``.
+
+    This function is deliberately transport-free: production and offline
+    diagnostics share it, so inspecting a dry run cannot drift from the
+    request the Anthropic adapter would submit. Authentication and Anthropic's
+    HTTP headers remain SDK-managed and are never included here.
+    """
+    return {
+        "model": model,
+        "system": system,
+        "messages": list(messages),
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
 
 
 class AnthropicProvider(_Provider):
@@ -153,23 +172,22 @@ class AnthropicProvider(_Provider):
         self._client = anthropic.Anthropic(api_key=api_key)
 
     def send(self, system, messages, max_tokens, temperature):
-        response = self._client.messages.create(
+        response = self._client.messages.create(**anthropic_request_kwargs(
             model=self.model, system=system, messages=messages,
-            max_tokens=max_tokens, temperature=temperature,
-        )
+            max_tokens=max_tokens, temperature=temperature))
         return response.content[0].text, response.usage.input_tokens, response.usage.output_tokens
 
     def classify(self, exc):
         sdk = self._sdk
         if isinstance(exc, sdk.RateLimitError):
-            return RETRY
+            return QUOTA
         if isinstance(exc, (sdk.APIConnectionError, sdk.APITimeoutError)):
             return NETWORK
         if isinstance(exc, sdk.APIStatusError):
             if exc.status_code >= 500:
                 return RETRY
-            if exc.status_code == 401:
-                return NETWORK       # no usable key: let the run continue locally
+            if exc.status_code in (401, 403):
+                return AUTH
             return FATAL
         return FATAL
 
@@ -207,7 +225,7 @@ class OpenAICompatibleProvider(_Provider):
     def classify(self, exc):
         sdk = self._sdk
         if isinstance(exc, sdk.RateLimitError):
-            return RETRY
+            return QUOTA
         if isinstance(exc, (sdk.APIConnectionError, sdk.APITimeoutError)):
             return NETWORK
         if isinstance(exc, sdk.APIStatusError):
@@ -215,7 +233,7 @@ class OpenAICompatibleProvider(_Provider):
             if status >= 500:
                 return RETRY
             if status in (401, 403):
-                return NETWORK
+                return AUTH
             return FATAL
         return FATAL
 

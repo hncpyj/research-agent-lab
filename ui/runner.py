@@ -47,6 +47,37 @@ class _DummyVectorDB:
     def close(self): pass
 
 
+class _UnavailableEmbed:
+    """Explicit absence of embeddings; never masquerades as a real vector."""
+
+    is_loaded = False
+
+    def embed(self, _text):
+        raise RuntimeError("no embedding backend is configured")
+
+    def embed_batch(self, _texts):
+        raise RuntimeError("no embedding backend is configured")
+
+
+class _APIKeywordModel:
+    """Expose the configured API model through the keyword-model interface."""
+
+    is_loaded = True
+
+    def __init__(self, api_model) -> None:
+        self._api_model = api_model
+
+    def generate(self, prompt: str, temperature: float = 0.1) -> str:
+        from router import TaskType
+
+        return self._api_model.generate(
+            prompt,
+            task_type=TaskType.KEYWORD_EXTRACTION,
+            max_tokens=300,
+            temperature=temperature,
+        )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # QueueConsole
 # ─────────────────────────────────────────────────────────────────────────────
@@ -131,6 +162,7 @@ class SessionRunner:
         goals: Optional[str] = None,
         constraints: Optional[str] = None,
         use_api: bool = True,
+        model_provider: Optional[str] = None,
         only: Optional[str] = None,   # run this one stage (agents/stages.py) and stop
     ) -> None:
         self.session_id = session_id
@@ -142,6 +174,7 @@ class SessionRunner:
         self.goals = goals or ""
         self.constraints = constraints or ""
         self.use_api = use_api
+        self.model_provider = (model_provider or "").strip().lower() or None
         self._q: queue.Queue = queue.Queue()
         self._question_event = threading.Event()
         self._question_choice: Optional[Any] = None
@@ -149,6 +182,7 @@ class SessionRunner:
         self._thread: Optional[threading.Thread] = None
         self._stop_flag = threading.Event()
         self._current_proc: Optional[Any] = None  # subprocess.Popen set by runner agent
+        self._api_model: Optional[Any] = None
         # Gates after the research question (hypothesis selection, plan approval)
         self._input_event = threading.Event()
         self._input_payload: Any = None
@@ -215,6 +249,17 @@ class SessionRunner:
             except Exception:
                 pass
 
+    def configure_model_api(self, enabled: bool, provider: str | None = None) -> None:
+        """Apply a session setting to this live runner before its next model call."""
+        self.use_api = bool(enabled)
+        if provider:
+            self.model_provider = provider.strip().lower()
+        if self._api_model is not None:
+            self._api_model.configure(
+                enabled=self.use_api,
+                provider=self.model_provider,
+            )
+
     def emit(self, event_type: str, data: Any = None) -> None:
         self._q.put({"type": event_type, "data": data or {}})
         self._touch()
@@ -250,13 +295,20 @@ class SessionRunner:
         try:
             self._run()
         except Exception as exc:
-            logger.exception("Pipeline crashed: %s", exc)
-            # What the person reading the page needs, with the traceback kept
-            # underneath rather than put first.
-            from ui.failures import describe
-            self.emit("error", describe(exc).as_dict())
-            # A crash in our own code is our fault, not the user's allowance.
-            outcome, reason = "failed_system", f"{type(exc).__name__}: {exc}"
+            from models.api_model import InferenceUnavailable, ModelAPIDisabled
+            if isinstance(exc, InferenceUnavailable):
+                from ui.failures import describe
+                self.emit("error", describe(exc).as_dict())
+                outcome = "cancelled" if isinstance(exc, ModelAPIDisabled) else "failed_provider"
+                reason = f"{type(exc).__name__}: {exc}"
+            else:
+                logger.exception("Pipeline crashed: %s", exc)
+                # What the person reading the page needs, with the traceback kept
+                # underneath rather than put first.
+                from ui.failures import describe
+                self.emit("error", describe(exc).as_dict())
+                # A crash in our own code is our fault, not the user's allowance.
+                outcome, reason = "failed_system", f"{type(exc).__name__}: {exc}"
         finally:
             if self._stop_flag.is_set() and outcome == "completed":
                 outcome, reason = "cancelled", "stopped by the user"
@@ -316,6 +368,61 @@ class SessionRunner:
             parts.append(f"\nConstraints / requirements: {self.constraints}")
         return "".join(parts)
 
+    def _configure_local_fallback(self, api_model) -> bool:
+        """Attach a local LLM when appropriate; hosted deployments are API-only."""
+        if config.HOSTED:
+            route = api_model.routing_info()
+            if route["mode"] == "off":
+                message = (
+                    "Hosted mode: local Ollama/GGUF inference is intentionally disabled; "
+                    "Model API is off for this session. "
+                    "Model-dependent phases will pause before any external request."
+                )
+            elif route["mode"] == "shared_free":
+                message = (
+                    "Hosted mode: local Ollama/GGUF inference is intentionally disabled; "
+                    "using the shared free model "
+                    f"{route['provider']} / {route['model']}."
+                )
+            else:
+                message = (
+                    "Hosted mode: local Ollama/GGUF inference is intentionally disabled; "
+                    "using the selected user API provider "
+                    f"{route['provider']} / {route['model']}."
+                )
+            self.emit("log", {
+                "message": message
+            })
+            return False
+
+        # Self-hosted/local behaviour remains Ollama → llama-cpp GGUF → none.
+        try:
+            from models.ollama_model import OllamaModel
+            local_model = OllamaModel()
+            local_model.load()
+            api_model.set_local_model(local_model)
+            self.emit("log", {
+                "message": f"Ollama '{local_model._resolved_model}' ready — API fallback active."
+            })
+            return True
+        except Exception as ollama_exc:
+            self.emit("log", {
+                "message": f"Ollama not available ({ollama_exc}). Trying local GGUF…"
+            })
+
+        try:
+            from models.local_model import LocalModel
+            local_model = LocalModel()
+            local_model.load()
+            api_model.set_local_model(local_model)
+            self.emit("log", {"message": "Local GGUF model loaded — API fallback ready."})
+            return True
+        except Exception as gguf_exc:
+            self.emit("log", {
+                "message": f"No local model available ({gguf_exc}). API-only mode."
+            })
+            return False
+
     def _run(self) -> None:
         qc = QueueConsole(self._q)
         self._patch_consoles(qc)
@@ -344,41 +451,11 @@ class SessionRunner:
         # Whose key this run spends: the person the session belongs to.
         owner_id = note_db.session_owner(self.session_id) or ""
         api_model = APIModel(cost_tracker=cost_tracker, on_budget_stop=_budget_stop,
-                             session_id=self.session_id, user_id=owner_id)
+                             session_id=self.session_id, user_id=owner_id,
+                             provider=self.model_provider, enabled=self.use_api)
+        self._api_model = api_model
 
-        # Honour the global API toggle — if disabled, go straight to local.
-        if not self.use_api:
-            api_model._api_available = False
-            self.emit("log", {"message": "Anthropic API disabled — using local model only."})
-
-        # Try to load a local model for API fallback.
-        # Priority: Ollama (server-based, auto-start) → llama-cpp GGUF → none
-        _local_loaded = False
-        try:
-            from models.ollama_model import OllamaModel
-            _lm = OllamaModel()
-            _lm.load()
-            api_model.set_local_model(_lm)
-            self.emit("log", {
-                "message": f"Ollama '{_lm._resolved_model}' ready — API fallback active."
-            })
-            _local_loaded = True
-        except Exception as _ollama_exc:
-            self.emit("log", {
-                "message": f"Ollama not available ({_ollama_exc}). Trying local GGUF…"
-            })
-
-        if not _local_loaded:
-            try:
-                from models.local_model import LocalModel
-                _lm = LocalModel()
-                _lm.load()
-                api_model.set_local_model(_lm)
-                self.emit("log", {"message": "Local GGUF model loaded — API fallback ready."})
-            except Exception as _gguf_exc:
-                self.emit("log", {
-                    "message": f"No local model available ({_gguf_exc}). API-only mode."
-                })
+        self._configure_local_fallback(api_model)
 
         # Resolve topic + status
         session = note_db.get_session(self.session_id)
@@ -511,6 +588,9 @@ class SessionRunner:
         # to steer the LLM toward the user's specific intent.
         if check_stop() or finished_requested_stage(): return
         if needed("question_selected"):
+            # A disabled or unconfigured hosted route is an expected pause, not
+            # a phase failure to retry. Check before announcing/starting Phase 3.
+            api_model.ensure_available("Gap Analysis")
             self.emit("phase_start", {"phase": 3, "name": "Gap Analysis"})
             rq = bugfix.wrap("Phase 3: Gap Analysis",
                              self._phase_gap_analysis,
@@ -675,38 +755,47 @@ class SessionRunner:
         from agents.paper_collection import PaperCollectionAgent
         from agents.degradation import DegradationLog
 
-        class _DummyEmbed:
-            is_loaded = True
-            def embed(self, text): return [0.0] * 768
-            def embed_batch(self, texts): return [[0.0] * 768 for _ in texts]
-
         vector_db = _DummyVectorDB()
 
-        # Try a real embedding backend so Phase 1's relevance ranking has an
-        # actual signal — the Web UI used to always pass a zero-vector dummy
-        # here, which made ranking a silent no-op (see PaperCollectionAgent
-        # ._rank_all). Falls back to the dummy, with a recorded degradation,
-        # if Ollama or the embedding model isn't available.
-        embed_model = _DummyEmbed()
-        try:
-            from models.ollama_model import OllamaEmbedModel
-            real_embed = OllamaEmbedModel()
-            real_embed.load()
-            embed_model = real_embed
-            self.emit("log", {"message": "Using Ollama embeddings for paper ranking."})
-        except Exception as exc:
-            DegradationLog(note_db, self.session_id, notify=lambda m: self.emit("log", {"message": m})).record(
-                1, "embedding_backend", "critical",
-                f"No real embedding backend available ({exc}). Paper relevance ranking "
-                f"in the Web UI will be degraded or unranked."
-            )
+        embed_model = _UnavailableEmbed()
+        lexical_fallback = config.HOSTED
+        if config.HOSTED:
+            self.emit("log", {
+                "message": (
+                    "Hosted mode: no remote embedding adapter is configured; "
+                    "using deterministic TF-IDF relevance ranking."
+                )
+            })
+        else:
+            # Preserve the self-hosted Ollama embedding path. An unavailable
+            # local backend remains an explicit degradation, never fake data.
+            try:
+                from models.ollama_model import OllamaEmbedModel
+                real_embed = OllamaEmbedModel()
+                real_embed.load()
+                embed_model = real_embed
+                self.emit("log", {"message": "Using Ollama embeddings for paper ranking."})
+            except Exception as exc:
+                DegradationLog(
+                    note_db,
+                    self.session_id,
+                    notify=lambda m: self.emit("log", {"message": m}),
+                ).record(
+                    1,
+                    "embedding_backend",
+                    "critical",
+                    f"No real embedding backend available ({exc}). Paper relevance "
+                    "ranking in the Web UI will be unranked.",
+                )
 
         agent = PaperCollectionAgent(
             local_model=None,
+            keyword_model=_APIKeywordModel(api_model) if config.HOSTED else None,
             embed_model=embed_model,
             vector_db=vector_db,
             note_db=note_db,
             top_k=config.ARXIV_TOP_K,
+            allow_lexical_ranking=lexical_fallback,
         )
         return agent.run(topic=topic, session_id=self.session_id)
 
@@ -743,11 +832,10 @@ class SessionRunner:
 
     def _phase_literature_review(self, papers, note_db, qc, api_model):
         from agents.literature_review import LiteratureReviewAgent
-        # Use the local model loaded at startup. This used to pass None, which
-        # silently reduced "reading" each paper to copying its first abstract
-        # sentences — the agent now records that as a critical degradation.
-        local = getattr(api_model, "_local_model", None)
-        agent = LiteratureReviewAgent(local_model=local, note_db=note_db)
+        # The review accepts the common text-model interface. Passing the
+        # central router (rather than reaching for a local model directly)
+        # makes API OFF/BYOK/shared-free precedence apply to Phase 2 as well.
+        agent = LiteratureReviewAgent(local_model=api_model, note_db=note_db)
         return agent.run(papers=papers, session_id=self.session_id)
 
     def _phase_gap_analysis(self, topic, lit_summary, papers, note_db, api_model):
@@ -835,16 +923,11 @@ class SessionRunner:
     def _phase_hypothesis(self, rq, papers, note_db, api_model):
         from agents.hypothesis import HypothesisAgent
 
-        class _DummyEmbed:
-            is_loaded = True
-            def embed(self, text): return [0.0] * 768
-            def embed_batch(self, texts): return [[0.0] * 768 for _ in texts]
-
         vector_db = _DummyVectorDB()
 
         agent = HypothesisAgent(
             api_model=api_model,
-            embed_model=_DummyEmbed(),
+            embed_model=_UnavailableEmbed(),
             vector_db=vector_db,
             note_db=note_db,
         )

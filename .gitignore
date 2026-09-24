@@ -86,5 +86,15 @@ paper/
 # Node packages for the public site (web/)
 node_modules/
 
+# Local package-manager and deployment-tool state
+/.pnpm-store/
+/.railway/
+/.vercel/
+
+# Local release bundles and design-reference copies
+/research_logs.zip
+/web/Research Agent Lab webpage original/
+/web/web.png
+
 # Research records: keep the evidence, not the scratch workspaces
 research_logs/**/attempt_*/

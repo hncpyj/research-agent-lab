@@ -2,6 +2,16 @@
 # people's work and the stored API keys, and the model files are gigabytes.
 data/
 experiments/
+memory/local/
+research_logs/raw/
+research_logs/records/
+research_logs/summaries/
+pilot_runs/
+confirmatory_runs/
+paper/
+results/
+.pnpm-store/
+node_modules/
 web/
 tests/
 .git/

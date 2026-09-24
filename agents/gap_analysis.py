@@ -23,6 +23,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 
+import config
 from router import TaskType
 
 if TYPE_CHECKING:
@@ -1100,6 +1101,16 @@ class GapAnalysisAgent:
 
     def _get_embedder(self):
         """Ollama embedding model, or None (recorded once) if unavailable."""
+        if config.HOSTED:
+            if not self._embedder_failed:
+                self._embedder_failed = True
+                if self._deg:
+                    self._deg.record(
+                        3, "embedding_backend", "warn",
+                        "Hosted mode has no embedding backend; relevance and excluded-scope "
+                        "checks on validation evidence are skipped.",
+                    )
+            return None
         if self._embedder is None and not self._embedder_failed:
             try:
                 from models.ollama_model import OllamaEmbedModel

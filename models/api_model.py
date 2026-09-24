@@ -1,5 +1,5 @@
 """
-The paid-API model interface.
+The external-model API interface.
 
 One class for whichever backend a run uses — Anthropic, OpenAI or Gemini (see
 models/providers.py) — with the behaviour that must not depend on which one
@@ -35,7 +35,7 @@ def _retry_wait() -> float:
 
 class APIModel:
     """
-    Single interface for every paid API call, whichever provider is chosen.
+    Single interface for every external model call, whichever provider is chosen.
     Falls back to a local model when the API is unreachable or exhausted.
     One instance is shared across all agents.
     """
@@ -50,35 +50,95 @@ class APIModel:
         provider: str | None = None,   # anthropic | openai | gemini; None = the chosen one
         session_id: str = "",          # so each call's cost lands on the right session
         user_id: str | None = None,    # whose stored key to use; None = the server's own
+        enabled: bool = True,          # authoritative external-model permission for this run
     ) -> None:
         self._tracker = cost_tracker or CostTracker()
         self.session_id = session_id
         self._local_model = local_model  # fallback when API unavailable
         self._on_budget_stop = on_budget_stop
         self._budget_warned = False
+        self._user_id = user_id
+        self._explicit_api_key = api_key
+        self._enabled = False
+        self._routing_mode = "off"
+        self._provider_error = ""
+        self._selected_provider = ""
+        self._selected_model = ""
+        self._provider_name = ""
+        self._model = ""
+        self._provider = None
+        self._api_available = False
+
+        self.configure(enabled=enabled, provider=provider, model=model,
+                       api_key=api_key, user_id=user_id)
+
+    def configure(
+        self,
+        *,
+        enabled: bool,
+        provider: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        user_id: str | None = None,
+    ) -> None:
+        """Apply the authoritative route without ever exposing a credential."""
+        if user_id is not None:
+            self._user_id = user_id
+        if api_key is not None:
+            self._explicit_api_key = api_key
+        self._enabled = bool(enabled)
+        self._routing_mode = "off" if not self._enabled else "configured"
+        self._provider_error = ""
 
         from tools import app_settings
-        self._provider_name = provider or app_settings.api_provider()
-        model = model or app_settings.api_model(self._provider_name)
+        selected_provider = (
+            provider or self._selected_provider or app_settings.api_provider()
+        ).strip().lower()
+        selected_model = model or app_settings.api_model(selected_provider)
+        self._selected_provider = selected_provider
+        self._selected_model = selected_model
+        self._provider_name = selected_provider
+        self._model = selected_model or selected_provider
+        self._provider = None
+        self._api_available = False
 
-        # A run belongs to somebody, and so does the key it spends. Given a
-        # user, their own stored key is used; the server's `.env` key is only
-        # theirs to use if this is their own machine or they own the server.
-        if api_key is None and user_id is not None:
+        if not self._enabled:
+            return
+
+        # Hosted routing has one explicit precedence: selected BYOK first,
+        # otherwise the shared free provider. The server's paid/default key is
+        # never an implicit fallback for a hosted account.
+        chosen_key = self._explicit_api_key
+        if chosen_key is None and config.HOSTED:
             from memory import api_keys
-            api_key = api_keys.key_for(user_id, self._provider_name)
+            own_key = api_keys.get(self._user_id, selected_provider) if self._user_id else ""
+            if own_key:
+                api_keys.mark_used(self._user_id, selected_provider)
+                chosen_key = own_key
+                self._routing_mode = "byok"
+            else:
+                self._provider_name = config.SHARED_FREE_PROVIDER
+                self._model = config.SHARED_FREE_MODEL
+                self._routing_mode = "shared_free"
+                try:
+                    chosen_key = providers.resolve(self._provider_name).key()
+                except providers.ProviderUnavailable as exc:
+                    self._provider_error = str(exc)
+                    return
+        elif chosen_key is None and self._user_id is not None:
+            from memory import api_keys
+            chosen_key = api_keys.key_for(self._user_id, selected_provider)
 
-        # An empty api_key means "this run has no paid backend" — the old
-        # behaviour when ANTHROPIC_API_KEY was unset — and must stay local.
         try:
-            self._provider = providers.build(self._provider_name, api_key, model)
+            self._provider = providers.build(self._provider_name, chosen_key, self._model)
             self._model = self._provider.model
             self._api_available = True
         except providers.ProviderUnavailable as exc:
-            logger.warning("%s — using the local model instead.", exc)
-            self._provider = None
-            self._model = model or self._provider_name
-            self._api_available = False
+            self._provider_error = str(exc)
+            if self._routing_mode == "shared_free":
+                logger.warning("Shared free model is not configured: %s", exc)
+            else:
+                logger.warning("%s — using the local model instead.", exc)
 
     # ------------------------------------------------------------------
     # Public interface
@@ -88,6 +148,52 @@ class APIModel:
         """Inject or replace the local fallback model after construction."""
         self._local_model = local_model
 
+    @property
+    def routing_mode(self) -> str:
+        return self._routing_mode
+
+    @property
+    def is_loaded(self) -> bool:
+        """Compatibility capability flag for agents that accept any text model."""
+        if self._api_available:
+            return True
+        return bool(self._local_model is not None and
+                    getattr(self._local_model, "is_loaded", False))
+
+    def routing_info(self) -> dict:
+        """Non-secret effective route, safe for UI and logs."""
+        return {
+            "mode": self._routing_mode,
+            "provider": self._provider_name if self._enabled else "",
+            "model": self._model if self._enabled else "",
+        }
+
+    def ensure_available(self, task_name: str = "this phase") -> None:
+        """Fail before a model-dependent phase without making a provider call."""
+        if not self._enabled:
+            if self._local_model is not None and getattr(self._local_model, "is_loaded", False):
+                return
+            raise ModelAPIDisabled(
+                f"Model API is disabled for this session. Hosted mode has no local "
+                f"inference backend, so {task_name} cannot continue. Enable Model API "
+                "to use the free hosted model or configure your own provider. "
+                "Your completed work has been preserved."
+            )
+        if self._api_available:
+            return
+        if self._local_model is not None and getattr(self._local_model, "is_loaded", False):
+            return
+        if self._routing_mode == "shared_free":
+            raise SharedProviderUnavailable(
+                "The free hosted model is not configured or is temporarily unavailable. "
+                "Your completed research is preserved. Retry later or configure your own "
+                "API provider."
+            )
+        raise BYOKProviderUnavailable(
+            f"The selected {self._provider_name} provider is unavailable. Your completed "
+            "research is preserved. Check that provider's key and retry."
+        )
+
     def over_budget(self) -> bool:
         """
         True once the day's API spend has reached API_DAILY_BUDGET_USD; every
@@ -95,6 +201,8 @@ class APIModel:
         spending without limit before 2026-09-20, and a run that dies on
         exhausted credit mid-way leaves a half-finished study behind.
         """
+        if self._routing_mode == "shared_free":
+            return False
         from tools import app_settings
         cap = app_settings.daily_budget_usd()      # settings page overrides .env
         if cap <= 0:
@@ -125,7 +233,15 @@ class APIModel:
         """
         task_name = task_type.name if isinstance(task_type, TaskType) else str(task_type)
 
-        if not self._api_available or self.over_budget():
+        if not self._enabled:
+            self.ensure_available(task_name)
+            return self._local_fallback(prompt, system, task_name, max_tokens)
+
+        if not self._api_available:
+            self.ensure_available(task_name)
+            return self._local_fallback(prompt, system, task_name, max_tokens)
+
+        if self.over_budget():
             return self._local_fallback(prompt, system, task_name, max_tokens)
 
         messages = [{"role": "user", "content": prompt}]
@@ -137,7 +253,19 @@ class APIModel:
                 temperature=temperature,
                 task_name=task_name,
             )
-        except _NetworkError as exc:
+        except (_ProviderQuotaError, _ProviderAuthError, _NetworkError) as exc:
+            if self._routing_mode == "shared_free":
+                raise SharedProviderUnavailable(
+                    "The free hosted model is temporarily unavailable or has reached its "
+                    "provider quota. Your completed research is preserved. Retry later or "
+                    "configure your own API provider."
+                ) from exc
+            if config.HOSTED and self._routing_mode == "byok":
+                raise BYOKProviderUnavailable(
+                    f"The selected {self._provider_name} BYOK provider could not complete "
+                    "the request. Your completed research is preserved; check its key, "
+                    "quota, and model access before retrying."
+                ) from exc
             logger.warning("API unreachable: %s — switching to local fallback.", exc)
             self._api_available = False
             return self._local_fallback(prompt, system, task_name, max_tokens)
@@ -148,6 +276,16 @@ class APIModel:
             # rather than dying half-way; a bug in our own code still raises.
             if self._provider is None or self._provider.classify(exc) != providers.FATAL:
                 raise
+            if self._routing_mode == "shared_free":
+                raise SharedProviderUnavailable(
+                    "The free hosted model rejected the request. Your completed research "
+                    "is preserved. Retry later or configure your own API provider."
+                ) from exc
+            if config.HOSTED and self._routing_mode == "byok":
+                raise BYOKProviderUnavailable(
+                    f"The selected {self._provider_name} BYOK provider rejected the request. "
+                    "Your completed research is preserved; check its model access and retry."
+                ) from exc
             status = getattr(exc, "status_code", "?")
             logger.warning("%s API error (HTTP %s: %s) — switching to local fallback.",
                            self._provider_name, status, exc)
@@ -296,7 +434,7 @@ class APIModel:
                         # A server on this machine bills nothing; pricing it
                         # would put money that was never spent against the
                         # daily cap and stop a run for no reason.
-                        is_local=self._provider.free,
+                        is_local=self._provider.free or self._routing_mode == "shared_free",
                         session_id=self.session_id,
                     )
                     logger.info(
@@ -315,6 +453,10 @@ class APIModel:
                 # How to read an error is the one thing that differs between
                 # providers; what to do about it does not.
                 kind = self._provider.classify(exc)
+                if kind == providers.QUOTA:
+                    raise _ProviderQuotaError(self._provider_name) from exc
+                if kind == providers.AUTH:
+                    raise _ProviderAuthError(self._provider_name) from exc
                 if kind == providers.RETRY:
                     wait = _retry_wait()
                     logger.warning("%s: retrying attempt %d/%d in %.0fs (%s)",
@@ -335,3 +477,27 @@ class APIModel:
 
 class _NetworkError(Exception):
     """Raised when the chosen API is unreachable, unauthorised, or has no key."""
+
+
+class _ProviderQuotaError(Exception):
+    """Internal quota signal; provider response text is deliberately not exposed."""
+
+
+class _ProviderAuthError(Exception):
+    """Internal authentication signal; never includes credentials."""
+
+
+class InferenceUnavailable(RuntimeError):
+    """Expected, resumable stop before a required inference capability."""
+
+
+class ModelAPIDisabled(InferenceUnavailable):
+    """The user deliberately disabled external model inference."""
+
+
+class SharedProviderUnavailable(InferenceUnavailable):
+    """The shared free hosted route is missing, exhausted, or unavailable."""
+
+
+class BYOKProviderUnavailable(InferenceUnavailable):
+    """The explicitly selected user-owned provider could not answer."""

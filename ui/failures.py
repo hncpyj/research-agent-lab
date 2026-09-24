@@ -41,6 +41,27 @@ def describe(exc: BaseException) -> Failure:
     name = type(exc).__name__
     detail = f"{name}: {exc}"
 
+    if name == "ModelAPIDisabled":
+        return Failure(
+            kind="model_api_off", title="Model API is off",
+            message="This session paused before sending any model request. Turn Model API "
+                    f"on to use the hosted free model, then resume. {_STOPPED_EARLY}",
+            detail=detail)
+
+    if name == "SharedProviderUnavailable":
+        return Failure(
+            kind="shared_provider", title="The free hosted model is unavailable",
+            message="The shared provider is not configured, rejected the request, or reached "
+                    f"its quota. Retry later or add your own provider key. {_STOPPED_EARLY}",
+            detail=detail)
+
+    if name == "BYOKProviderUnavailable":
+        return Failure(
+            kind="byok_provider", title="Your selected model provider is unavailable",
+            message="Check that provider's key, quota, and model access, then resume. "
+                    f"{_STOPPED_EARLY}",
+            detail=detail)
+
     if name == "PreflightBlocked":
         return Failure(
             kind="preflight", title="The experiment was not run",

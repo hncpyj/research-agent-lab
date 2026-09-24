@@ -1,7 +1,9 @@
-import { Link } from 'react-router-dom';
 import GitHubMetrics from '../../components/GitHubMetrics';
 import PublicFooter from '../../components/PublicFooter';
 import PublicNav from '../../components/PublicNav';
+import { hostedAppUrl } from '../../config';
+
+const repositoryUrl = 'https://github.com/hncpyj/research-agent-lab';
 
 const boundaryStages = [
   ['01', 'Approved intent', 'Record the research question, hypothesis, variables, constraints, and analysis plan.'],
@@ -32,11 +34,11 @@ export default function Home() {
     <div className="public-light min-h-screen">
       <PublicNav />
       <main id="main-content">
-        <section className="pt-32 pb-20 px-6 relative overflow-hidden">
+        <section className="pt-32 pb-16 px-6 relative overflow-hidden">
           <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 70% 55% at 50% -5%, rgba(10,170,144,0.12), transparent 70%)' }} />
           <div className="max-w-4xl mx-auto text-center relative">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono mb-8 border" style={{ borderColor: 'rgba(10,170,144,0.3)', color: 'var(--primary)', background: 'rgba(10,170,144,0.07)' }}>
-              Research preview · Source available
+              Open source · Hosted beta
             </div>
             <h1 className="font-display text-5xl md:text-7xl font-light leading-[0.98] tracking-tight mb-7" style={{ color: 'var(--foreground)' }}>
               Keep the approved study<br /><em className="not-italic" style={{ color: 'var(--primary)' }}>in control.</em>
@@ -45,10 +47,16 @@ export default function Home() {
               ResearchAgentLab is a local-first autonomous research system for testing whether scientific intent survives the path from protocol to code to accepted results.
             </p>
             <div className="flex flex-wrap justify-center gap-3">
-              <a href="https://github.com/hncpyj/research-agent-lab" target="_blank" rel="noopener noreferrer" className="px-6 py-3 rounded font-medium text-sm" style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>View the source</a>
-              <Link to="/docs" className="px-6 py-3 rounded font-medium text-sm border" style={{ borderColor: 'var(--border)', color: 'var(--foreground)', background: 'var(--card)' }}>Run locally</Link>
+              <a href={repositoryUrl} target="_blank" rel="noopener noreferrer" className="px-7 py-3.5 rounded font-semibold text-sm inline-flex items-center gap-2 shadow-sm" style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .7A11.5 11.5 0 0 0 8.36 23c.58.1.79-.25.79-.56v-2.02c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.04 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.29-5.27-5.72 0-1.26.45-2.3 1.19-3.1-.12-.3-.52-1.48.11-3.07 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.77.11 3.06.74.82 1.19 1.85 1.19 3.11 0 4.45-2.71 5.43-5.29 5.72.42.36.79 1.06.79 2.14v3.18c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z" /></svg>
+                View source on GitHub
+              </a>
+              <a href={hostedAppUrl('/signup')} className="px-6 py-3.5 rounded font-medium text-sm border" style={{ borderColor: 'var(--border)', color: 'var(--foreground)', background: 'var(--card)' }}>Try the hosted beta</a>
             </div>
-            <p className="text-xs mt-5" style={{ color: 'var(--muted-foreground)' }}>No public hosted accounts, uploads, or research execution are offered on this site.</p>
+            <p className="text-xs mt-5" style={{ color: 'var(--muted-foreground)' }}>Read the implementation, evidence record, and local setup first. The hosted beta is optional.</p>
+          </div>
+          <div className="max-w-5xl mx-auto mt-14 relative">
+            <GitHubMetrics />
           </div>
         </section>
 
@@ -113,15 +121,17 @@ export default function Home() {
 
         <section className="px-6 pb-20">
           <div className="max-w-6xl mx-auto p-8 md:p-12 rounded-xl border" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
-            <div className="grid md:grid-cols-[1fr_auto] gap-8 items-center mb-10">
+            <div className="grid md:grid-cols-[1fr_auto] gap-8 items-center">
               <div>
                 <p className="text-xs font-mono uppercase tracking-widest mb-3" style={{ color: 'var(--primary)' }}>Current availability</p>
-                <h2 className="font-display text-3xl font-light mb-3" style={{ color: 'var(--foreground)' }}>Run it on infrastructure you control.</h2>
-                <p className="text-sm leading-relaxed max-w-2xl" style={{ color: 'var(--muted-foreground)' }}>The research application is available for local, noncommercial use under the PolyForm Noncommercial 1.0.0 license. This public site is informational only.</p>
+                <h2 className="font-display text-3xl font-light mb-3" style={{ color: 'var(--foreground)' }}>Try the hosted beta or run it locally.</h2>
+                <p className="text-sm leading-relaxed max-w-2xl" style={{ color: 'var(--muted-foreground)' }}>Beta accounts provide an isolated workspace while high-risk execution remains disabled. The source is also available for local, noncommercial use under the PolyForm Noncommercial 1.0.0 license.</p>
               </div>
-              <Link to="/docs" className="px-5 py-2.5 rounded text-sm font-medium text-center" style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>Installation guide</Link>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <a href={repositoryUrl} target="_blank" rel="noopener noreferrer" className="px-5 py-2.5 rounded text-sm font-semibold text-center" style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>Open GitHub repository</a>
+                <a href={hostedAppUrl('/signup')} className="px-5 py-2.5 rounded text-sm font-medium text-center border" style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}>Create beta account</a>
+              </div>
             </div>
-            <GitHubMetrics />
           </div>
         </section>
       </main>

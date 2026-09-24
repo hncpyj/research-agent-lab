@@ -111,11 +111,12 @@ def _initial_use_api() -> bool:
 
 
 _settings: dict[str, bool] = {
-    "use_api": _initial_use_api(),   # False = skip Anthropic API, go straight to local model
+    "use_api": _initial_use_api(),   # default for new sessions; each session persists its own value
 }
 
 
 class SettingsRequest(BaseModel):
+    session_id: str = ""
     use_api: Optional[bool] = None
     daily_budget_usd: Optional[float] = None
     api_provider: Optional[str] = None
@@ -130,6 +131,24 @@ class LoginRequest(BaseModel):
 class AccountRequest(BaseModel):
     email: str
     password: str
+
+
+class EmailRequest(BaseModel):
+    email: str
+
+
+class AccountTokenRequest(BaseModel):
+    token: str
+
+
+class PasswordResetRequest(BaseModel):
+    token: str
+    password: str
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 class NewTokenRequest(BaseModel):
@@ -186,8 +205,47 @@ class AssignProjectRequest(BaseModel):
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
+def _session_inference_settings(session: dict | None) -> tuple[bool, str]:
+    """Return the durable inference toggle/provider for one session."""
+    from tools import app_settings
+
+    if not session:
+        return bool(_settings["use_api"]), app_settings.api_provider()
+    raw_enabled = session.get("model_api_enabled")
+    enabled = bool(_settings["use_api"]) if raw_enabled is None else bool(raw_enabled)
+    provider = (session.get("model_provider") or app_settings.api_provider()).strip().lower()
+    return enabled, provider
+
+
+def _effective_inference_route(request: Request, enabled: bool, provider: str) -> dict:
+    """Describe the actual route without returning or logging any credential."""
+    from tools import app_settings
+
+    if not enabled:
+        return {"inference_mode": "off", "effective_provider": "", "effective_model": ""}
+    if config.HOSTED:
+        from memory import api_keys
+        user = _current_user(request)
+        if user is not None and api_keys.get(user.user_id, provider):
+            return {
+                "inference_mode": "byok",
+                "effective_provider": provider,
+                "effective_model": app_settings.api_model(provider),
+            }
+        return {
+            "inference_mode": "shared_free",
+            "effective_provider": config.SHARED_FREE_PROVIDER,
+            "effective_model": config.SHARED_FREE_MODEL,
+        }
+    return {
+        "inference_mode": "configured",
+        "effective_provider": provider,
+        "effective_model": app_settings.api_model(provider),
+    }
+
+
 @app.get("/api/settings")
-async def get_settings():
+async def get_settings(request: Request, session_id: str = ""):
     """Which backend a run uses, and what the API has cost today against the cap."""
     from models import providers
     from tools import app_settings
@@ -198,8 +256,13 @@ async def get_settings():
         spent = CostTracker().spend_today()
     except Exception as exc:
         logger.warning("Could not read today's API spend: %s", exc)
-    provider = app_settings.api_provider()
-    return {**_settings, "spend_today_usd": round(spent, 4),
+    session = None
+    if session_id:
+        _authorise_session(session_id, request)
+        session = NoteDB().get_session(session_id)
+    enabled, provider = _session_inference_settings(session)
+    route = _effective_inference_route(request, enabled, provider)
+    return {"use_api": enabled, **route, "spend_today_usd": round(spent, 4),
             "daily_budget_usd": app_settings.daily_budget_usd(),
             "budget_from_env": app_settings.load()["daily_budget_usd"] is None,
             "api_provider": provider,
@@ -209,15 +272,22 @@ async def get_settings():
 
 
 @app.post("/api/settings")
-async def update_settings(req: SettingsRequest):
+async def update_settings(req: SettingsRequest, request: Request):
     """Change what can be changed while running; everything else needs .env."""
     from models import providers
     from tools import app_settings
 
+    session_id = req.session_id.strip()
+    session_updates: dict = {}
+    if session_id:
+        _authorise_session(session_id, request)
     stored: dict = {}
     if req.use_api is not None:
-        _settings["use_api"] = req.use_api
-        stored["use_api"] = req.use_api
+        if session_id:
+            session_updates["model_api_enabled"] = bool(req.use_api)
+        else:
+            _settings["use_api"] = req.use_api
+            stored["use_api"] = req.use_api
     if req.daily_budget_usd is not None:
         if req.daily_budget_usd < 0:
             raise HTTPException(status_code=400, detail="A daily cap cannot be negative.")
@@ -227,7 +297,17 @@ async def update_settings(req: SettingsRequest):
             providers.resolve(req.api_provider)
         except providers.ProviderUnavailable as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        stored["api_provider"] = req.api_provider.strip().lower()
+        if session_id:
+            session_updates["model_provider"] = req.api_provider.strip().lower()
+        else:
+            stored["api_provider"] = req.api_provider.strip().lower()
+    if session_updates:
+        NoteDB().update_session(session_id, **session_updates)
+        runner = _runners.get(session_id)
+        if runner and runner.is_alive():
+            updated_session = NoteDB().get_session(session_id)
+            enabled, provider = _session_inference_settings(updated_session)
+            runner.configure_model_api(enabled, provider)
     if stored:
         app_settings.save(stored)
     if req.local_server_url is not None:
@@ -239,7 +319,7 @@ async def update_settings(req: SettingsRequest):
     if req.api_model is not None:
         # Kept per provider, so switching back and forth does not lose a choice.
         app_settings.set_api_model(req.api_provider or app_settings.api_provider(), req.api_model)
-    return await get_settings()
+    return await get_settings(request, session_id=session_id)
 
 
 @app.get("/api/local-server/models")
@@ -554,6 +634,13 @@ async def environment():
 
 
 @app.get("/", include_in_schema=False)
+@app.get("/login", include_in_schema=False)
+@app.get("/signup", include_in_schema=False)
+@app.get("/verify-email", include_in_schema=False)
+@app.get("/forgot-password", include_in_schema=False)
+@app.get("/reset-password", include_in_schema=False)
+@app.get("/app", include_in_schema=False)
+@app.get("/app/{path:path}", include_in_schema=False)
 async def serve_spa():
     return FileResponse(_static_dir / "index.html")
 
@@ -570,6 +657,12 @@ ACCOUNT_COOKIE = "ra_user"
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_WINDOW_S = 300
 _LOGIN_MAX_TRIES = 10
+_SIGNUP_ATTEMPTS: dict[str, list[float]] = {}
+_SIGNUP_WINDOW_S = 3600
+_SIGNUP_MAX_TRIES = 5
+_EMAIL_ATTEMPTS: dict[str, list[float]] = {}
+_EMAIL_WINDOW_S = 3600
+_EMAIL_MAX_TRIES = 5
 
 
 def _client_address(request: Request) -> str:
@@ -607,8 +700,27 @@ def _set_token_cookie(response: Response, token: str, request: Request) -> None:
 # whether one is needed at all.
 # /health is open because whatever runs this has no token to offer; it
 # answers with liveness only, never session data.
-_OPEN_PATHS = {"/", "/api/access/state", "/api/login", "/favicon.ico", "/health",
-               "/api/auth/signup", "/api/auth/login", "/api/auth/logout", "/api/auth/me"}
+_OPEN_PATHS = {
+    "/", "/login", "/signup", "/verify-email", "/forgot-password",
+    "/reset-password", "/app", "/favicon.ico", "/health",
+    "/api/access/state", "/api/login", "/api/auth/login", "/api/auth/logout",
+    "/api/auth/me", "/api/auth/verify",
+    "/api/auth/resend-verification", "/api/auth/password/forgot",
+    "/api/auth/password/reset",
+}
+
+# Account authentication replaces the shared UI token for normal hosted use.
+# These are the only API paths a signed-out browser needs in order to discover
+# the account state, create an allowed account, or sign in.  The HTML shell and
+# static assets stay public so they can render the sign-in screen.
+_ACCOUNT_OPEN_PATHS = {
+    "/", "/login", "/signup", "/verify-email", "/forgot-password",
+    "/reset-password", "/app", "/favicon.ico", "/health",
+    "/api/access/state", "/api/login", "/api/logout",
+    "/api/auth/signup", "/api/auth/login", "/api/auth/logout", "/api/auth/me",
+    "/api/auth/verify", "/api/auth/resend-verification",
+    "/api/auth/password/forgot", "/api/auth/password/reset",
+}
 
 
 def _token_ok(given: str | None) -> bool:
@@ -620,7 +732,15 @@ def _request_token(request: Request) -> str | None:
     header = request.headers.get("Authorization", "")
     if header.startswith("Bearer "):
         return header[7:].strip()
-    return request.query_params.get("token") or request.cookies.get(_TOKEN_COOKIE)
+    # Query-string secrets are retained for local backwards compatibility only.
+    # Hosted URLs pass through proxies, access logs and browser history, all of
+    # which can retain the full URL. Hosted users exchange the token in the
+    # POST /api/login body and receive an HttpOnly cookie instead.
+    if not config.HOSTED:
+        query_token = request.query_params.get("token")
+        if query_token:
+            return query_token
+    return request.cookies.get(_TOKEN_COOKIE)
 
 
 def _signed_in(request: Request) -> bool:
@@ -646,6 +766,8 @@ def _require_user(request: Request):
 
     user = _current_user(request)
     if user is not None:
+        if not user.email_verified:
+            raise HTTPException(status_code=403, detail="Verify your email to continue.")
         return user
     if accounts_exist():
         raise HTTPException(status_code=401, detail="Sign in to use this.")
@@ -682,18 +804,41 @@ def _authorise_session(session_id: str, request: Request):
 @app.middleware("http")
 async def _require_token(request: Request, call_next):
     from ui.access import locked
+    from memory.accounts import accounts_exist
 
     path = request.url.path
-    if path.startswith("/static/") or path in _OPEN_PATHS or not locked():
+    public_member_signup = path == "/api/auth/signup" and accounts_exist()
+    if (path.startswith("/static/") or path.startswith("/app/") or
+            path in _OPEN_PATHS or public_member_signup or not locked()):
         return await call_next(request)
     given = _request_token(request)
     if not _token_ok(given):
         return Response(content=json.dumps({"detail": "Sign in with an access token."}),
                         status_code=401, media_type="application/json")
     response = await call_next(request)
-    if request.query_params.get("token"):     # a ?token= link signs this browser in
+    if not config.HOSTED and request.query_params.get("token"):
         _set_token_cookie(response, given, request)
     return response
+
+
+@app.middleware("http")
+async def _require_account_session(request: Request, call_next):
+    """Require a real account for every private HTTP API once accounts exist."""
+    from memory.accounts import accounts_exist
+
+    path = request.url.path
+    public_page = (path.startswith("/static/") or path.startswith("/app/") or
+                   path in _ACCOUNT_OPEN_PATHS)
+    if public_page or not accounts_exist():
+        return await call_next(request)
+    user = _current_user(request)
+    if user is None:
+        return Response(content=json.dumps({"detail": "Sign in to use this."}),
+                        status_code=401, media_type="application/json")
+    if not user.email_verified:
+        return Response(content=json.dumps({"detail": "Verify your email to continue."}),
+                        status_code=403, media_type="application/json")
+    return await call_next(request)
 
 
 @app.get("/health", include_in_schema=False)
@@ -770,24 +915,56 @@ async def logout():
 
 @app.post("/api/auth/signup")
 async def signup(req: AccountRequest, request: Request):
-    """
-    Make an account. The first one on a machine is the owner and adopts the
-    research already there; after that, signing up is only open when
-    ALLOW_SIGNUP is set, so a private server does not collect strangers.
-    """
-    from memory.accounts import AccountError, accounts_exist, create_user, issue_cookie
+    """Create an inactive account and send a one-time verification link."""
+    import time as _time
+
+    from memory import account_email
+    from memory.accounts import (AccountError, accounts_exist, create_user,
+                                 get_user_by_email, issue_account_token,
+                                 validate_password)
 
     if accounts_exist() and not config.ALLOW_SIGNUP:
         raise HTTPException(status_code=403,
                             detail="This server is not accepting new accounts.")
+    if not account_email.configured():
+        raise HTTPException(status_code=503,
+                            detail="Account email is not configured on this server.")
+    address = _client_address(request)
+    recent = [t for t in _SIGNUP_ATTEMPTS.get(address, [])
+              if _time.time() - t < _SIGNUP_WINDOW_S]
+    if len(recent) >= _SIGNUP_MAX_TRIES:
+        _SIGNUP_ATTEMPTS[address] = recent
+        raise HTTPException(status_code=429,
+                            detail="Too many account attempts. Try again later.")
+    recent.append(_time.time())
+    _SIGNUP_ATTEMPTS[address] = recent
     try:
-        user = create_user(req.email, req.password)
+        validate_password(req.password, req.email)
     except AccountError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    response = Response(content=json.dumps({"status": "ok", "user": user.as_dict()}),
-                        media_type="application/json")
-    _set_account_cookie(response, user, request)
-    return response
+    user = get_user_by_email(req.email)
+    if user is None:
+        try:
+            user = create_user(req.email, req.password)
+        except AccountError as exc:
+            # A concurrent request may have inserted the same address. Keep the
+            # public response non-enumerating and look it up once more.
+            user = get_user_by_email(req.email)
+            if user is None:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not user.email_verified:
+        token = issue_account_token(user.user_id, "verify_email")
+        try:
+            await asyncio.to_thread(account_email.send_verification, user.email, token)
+        except account_email.EmailDeliveryError as exc:
+            logger.error("Could not deliver verification email for user %s: %s",
+                         user.user_id, exc)
+            raise HTTPException(status_code=503,
+                                detail="Verification email could not be delivered. Try again later.") from exc
+    return Response(status_code=202, content=json.dumps({
+        "status": "verification_required",
+        "message": "If this address can be registered, a verification email has been sent.",
+    }), media_type="application/json")
 
 
 @app.post("/api/auth/login")
@@ -807,7 +984,110 @@ async def account_login(req: AccountRequest, request: Request):
         recent.append(_time.time())
         _LOGIN_ATTEMPTS[address] = recent
         raise HTTPException(status_code=401, detail="Wrong email or password.")
+    if not user.email_verified:
+        raise HTTPException(status_code=403, detail="Verify your email before signing in.")
     _LOGIN_ATTEMPTS.pop(address, None)
+    response = Response(content=json.dumps({"status": "ok", "user": user.as_dict()}),
+                        media_type="application/json")
+    _set_account_cookie(response, user, request)
+    return response
+
+
+def _limit_account_email(request: Request) -> None:
+    import time as _time
+
+    address = _client_address(request)
+    recent = [t for t in _EMAIL_ATTEMPTS.get(address, [])
+              if _time.time() - t < _EMAIL_WINDOW_S]
+    if len(recent) >= _EMAIL_MAX_TRIES:
+        _EMAIL_ATTEMPTS[address] = recent
+        raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
+    recent.append(_time.time())
+    _EMAIL_ATTEMPTS[address] = recent
+
+
+@app.post("/api/auth/resend-verification")
+async def resend_verification(req: EmailRequest, request: Request):
+    """Send a fresh link without revealing whether an account exists."""
+    from memory import account_email
+    from memory.accounts import get_user_by_email, issue_account_token
+
+    _limit_account_email(request)
+    if not account_email.configured():
+        raise HTTPException(status_code=503,
+                            detail="Account email is not configured on this server.")
+    user = get_user_by_email(req.email)
+    if user is not None and not user.email_verified:
+        token = issue_account_token(user.user_id, "verify_email")
+        try:
+            await asyncio.to_thread(account_email.send_verification, user.email, token)
+        except account_email.EmailDeliveryError as exc:
+            logger.error("Could not resend verification email for user %s: %s",
+                         user.user_id, exc)
+    return {"status": "ok", "message": "If the account needs verification, an email has been sent."}
+
+
+@app.post("/api/auth/verify")
+async def verify_account_email(req: AccountTokenRequest, request: Request):
+    from memory.accounts import verify_email_token
+
+    user = verify_email_token(req.token)
+    if user is None:
+        raise HTTPException(status_code=400, detail="That verification link is invalid or expired.")
+    response = Response(content=json.dumps({"status": "ok", "user": user.as_dict()}),
+                        media_type="application/json")
+    _set_account_cookie(response, user, request)
+    return response
+
+
+@app.post("/api/auth/password/forgot")
+async def forgot_password(req: EmailRequest, request: Request):
+    """Always return the same response so account existence is not disclosed."""
+    from memory import account_email
+    from memory.accounts import get_user_by_email, issue_account_token
+
+    _limit_account_email(request)
+    if not account_email.configured():
+        raise HTTPException(status_code=503,
+                            detail="Account email is not configured on this server.")
+    user = get_user_by_email(req.email)
+    if user is not None:
+        token = issue_account_token(user.user_id, "reset_password")
+        try:
+            await asyncio.to_thread(account_email.send_password_reset, user.email, token)
+        except account_email.EmailDeliveryError as exc:
+            logger.error("Could not deliver password reset email for user %s: %s",
+                         user.user_id, exc)
+    return {"status": "ok", "message": "If an account exists, a reset email has been sent."}
+
+
+@app.post("/api/auth/password/reset")
+async def reset_password(req: PasswordResetRequest, request: Request):
+    from memory.accounts import AccountError, reset_password_with_token
+
+    try:
+        user = reset_password_with_token(req.token, req.password)
+    except AccountError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if user is None:
+        raise HTTPException(status_code=400, detail="That reset link is invalid or expired.")
+    response = Response(content=json.dumps({"status": "ok", "user": user.as_dict()}),
+                        media_type="application/json")
+    _set_account_cookie(response, user, request)
+    return response
+
+
+@app.post("/api/auth/password/change")
+async def update_password(req: PasswordChangeRequest, request: Request):
+    from memory.accounts import AccountError, change_password
+
+    current = _require_user(request)
+    try:
+        user = change_password(current.user_id, req.current_password, req.new_password)
+    except AccountError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if user is None:
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
     response = Response(content=json.dumps({"status": "ok", "user": user.as_dict()}),
                         media_type="application/json")
     _set_account_cookie(response, user, request)
@@ -824,10 +1104,15 @@ async def account_logout():
 @app.get("/api/auth/me")
 async def account_me(request: Request):
     """Who is signed in, and whether this server uses accounts at all."""
-    from memory.accounts import accounts_exist
+    from memory import account_email
+    from memory.accounts import MAX_PASSWORD, MIN_PASSWORD, accounts_exist
 
     user = _current_user(request)
     return {"accounts": accounts_exist(), "signup_open": bool(config.ALLOW_SIGNUP),
+            "email_configured": account_email.configured(),
+            "password_policy": {"min_length": MIN_PASSWORD, "max_length": MAX_PASSWORD,
+                                "lowercase": True, "uppercase": True,
+                                "number": True, "symbol": True},
             "user": user.as_dict() if user else None}
 
 
@@ -1104,12 +1389,12 @@ def _load_report_json(session_id: str) -> dict | None:
 
 
 @app.post("/api/sessions/{session_id}/report", status_code=201)
-async def generate_report(session_id: str):
+async def generate_report(session_id: str, request: Request):
     """
     Generate the research report for a session (LLM call — may take ~30s).
     Saves report.json + rendered files under data/reports/{session_id}/.
     Returns the full report JSON plus a 'mode' field:
-      "api"      — used Anthropic Claude API
+      "api"      — used the session's effective model API route
       "local"    — used local LLM (llama-cpp) as API fallback
       "template" — no LLM available; data-driven template only
     """
@@ -1117,6 +1402,7 @@ async def generate_report(session_id: str):
     from agents.report_agent import ReportAgent
     from ui.report_renderer import save_all
 
+    _authorise_session(session_id, request)
     db = NoteDB()
     session = db.get_session(session_id)
     if not session:
@@ -1129,24 +1415,21 @@ async def generate_report(session_id: str):
         report = {k: v for k, v in study_report["content"].items() if k != "results_hash"}
         return {"report": report, "mode": "study"}
 
-    # Build APIModel — gracefully handles missing API key (sets _api_available=False)
+    use_api, model_provider = _session_inference_settings(session)
     api_model = APIModel(session_id=session_id,
-                         user_id=db.session_owner(session_id) or "")
-    # Honour the API toggle here too. This endpoint used to build its own
-    # APIModel and call the API whenever a key was configured, even with the
-    # toggle off.
-    if not _settings["use_api"]:
-        api_model._api_available = False
+                         user_id=db.session_owner(session_id) or "",
+                         provider=model_provider, enabled=use_api)
 
-    # Local fallback: Ollama first (what the pipeline runner uses), then GGUF.
+    # Hosted deployments never probe for a local binary or model file.
     local_model = None
-    try:
-        from models.ollama_model import OllamaModel
-        local_model = OllamaModel()
-        local_model.load()
-    except Exception as exc:
-        logger.info("Ollama not available for report generation (%s); trying GGUF.", exc)
-        local_model = _try_get_local_model()
+    if not config.HOSTED:
+        try:
+            from models.ollama_model import OllamaModel
+            local_model = OllamaModel()
+            local_model.load()
+        except Exception as exc:
+            logger.info("Ollama not available for report generation (%s); trying GGUF.", exc)
+            local_model = _try_get_local_model()
     if local_model is not None:
         api_model.set_local_model(local_model)
 
@@ -1166,22 +1449,41 @@ async def generate_report(session_id: str):
 
 
 @app.get("/api/report-backend-status")
-async def report_backend_status():
+async def report_backend_status(request: Request, session_id: str = ""):
     """
     Return which report-generation backends are available.
     Used by the UI to show the expected mode before generating.
     """
+    from models import providers
+
+    session = None
+    if session_id:
+        _authorise_session(session_id, request)
+        session = NoteDB().get_session(session_id)
+    enabled, provider = _session_inference_settings(session)
+    route = _effective_inference_route(request, enabled, provider)
+    effective_provider = route["effective_provider"]
+    api_ready = False
+    if enabled and route["inference_mode"] == "byok":
+        api_ready = True
+    elif enabled and effective_provider:
+        try:
+            api_ready = bool(providers.resolve(effective_provider).key())
+        except providers.ProviderUnavailable:
+            api_ready = False
     lm_path = Path(config.LOCAL_MODEL_PATH)
     lm_loaded = bool(_local_model_singleton and _local_model_singleton.is_loaded)
+    local_ready = not config.HOSTED and (lm_path.exists() or lm_loaded)
     return {
-        "api_key_configured": bool(config.ANTHROPIC_API_KEY),
-        "local_model_file_exists": lm_path.exists(),
+        "api_key_configured": api_ready,
+        **route,
+        "local_model_file_exists": bool(not config.HOSTED and lm_path.exists()),
         "local_model_loaded": lm_loaded,
         "local_model_path": str(lm_path),
         # Expected mode: api → local → template
         "expected_mode": (
-            "api" if config.ANTHROPIC_API_KEY
-            else "local" if (lm_path.exists() or lm_loaded)
+            "api" if api_ready
+            else "local" if local_ready
             else "template"
         ),
     }
@@ -1241,6 +1543,8 @@ async def download_pdf(session_id: str):
 
 @app.post("/api/sessions", status_code=201)
 async def create_session(req: NewSessionRequest, request: Request):
+    from tools import app_settings
+
     topic = req.topic.strip()
     if not topic:
         raise HTTPException(status_code=400, detail="Topic cannot be empty.")
@@ -1257,6 +1561,8 @@ async def create_session(req: NewSessionRequest, request: Request):
     session_id = db.create_session(
         topic, background=background, goals=goals, constraints=constraints,
         owner_id=owner.user_id if owner else "", project_id=project_id,
+        model_api_enabled=_settings["use_api"],
+        model_provider=app_settings.api_provider(),
     )
 
     # Someone starting in the middle — their own papers, their own question —
@@ -1274,6 +1580,7 @@ async def create_session(req: NewSessionRequest, request: Request):
         goals=goals,
         constraints=constraints,
         use_api=_settings["use_api"],
+        model_provider=app_settings.api_provider(),
     )
     runner.run_id = run_id
     _runners[session_id] = runner
@@ -1320,7 +1627,8 @@ async def stop_session(session_id: str):
 
 
 @app.post("/api/sessions/{session_id}/resume")
-async def resume_session(session_id: str):
+async def resume_session(session_id: str, request: Request):
+    _authorise_session(session_id, request)
     db = NoteDB()
     session = db.get_session(session_id)
     if not session:
@@ -1331,12 +1639,14 @@ async def resume_session(session_id: str):
         return {"session_id": session_id, "status": "already_running"}
 
     # Restore detail fields from DB so the runner uses them
+    use_api, model_provider = _session_inference_settings(session)
     runner = SessionRunner(
         session_id=session_id,
         background=session.get("background") or "",
         goals=session.get("goals") or "",
         constraints=session.get("constraints") or "",
-        use_api=_settings["use_api"],
+        use_api=use_api,
+        model_provider=model_provider,
     )
     _runners[session_id] = runner
     runner.start()
@@ -1383,12 +1693,14 @@ def _start_runner(session_id: str, db: NoteDB, only: str | None = None) -> bool:
     if existing and existing.is_alive():
         return False
     session = db.get_session(session_id)
+    use_api, model_provider = _session_inference_settings(session)
     runner = SessionRunner(
         session_id=session_id,
         background=session.get("background") or "",
         goals=session.get("goals") or "",
         constraints=session.get("constraints") or "",
-        use_api=_settings["use_api"],
+        use_api=use_api,
+        model_provider=model_provider,
         only=only,
     )
     _runners[session_id] = runner
@@ -1676,8 +1988,8 @@ def _websocket_may_watch(session_id: str, websocket: WebSocket) -> bool:
 
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    if config.UI_TOKEN and not _token_ok(websocket.query_params.get("token")
-                                         or websocket.cookies.get(_TOKEN_COOKIE)):
+    query_token = websocket.query_params.get("token") if not config.HOSTED else None
+    if config.UI_TOKEN and not _token_ok(query_token or websocket.cookies.get(_TOKEN_COOKIE)):
         await websocket.close(code=1008)      # HTTP middleware does not see websockets
         return
     if not _websocket_may_watch(session_id, websocket):

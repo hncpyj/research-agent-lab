@@ -29,7 +29,7 @@ def parse_args():
     p.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     p.add_argument("--reload", action="store_true", help="Enable hot-reload (dev mode)")
     p.add_argument("--allow-insecure", action="store_true",
-                   help="Bind a non-localhost address with no UI_TOKEN set (not advised)")
+                   help="Bind a non-localhost address without an access gate (not advised)")
     return p.parse_args()
 
 
@@ -55,23 +55,37 @@ def main():
 
     import config
 
-    # This server runs experiment code, reads every session and can remove
-    # them, and it has no accounts. Reaching it must mean either sitting at
-    # this machine or holding UI_TOKEN.
-    if not _loopback(args.host) and not config.UI_TOKEN and not args.allow_insecure:
-        print(f"\n  Refusing to serve on {args.host} with no UI_TOKEN set.")
-        print("  Set UI_TOKEN in .env (any long random string) and open the UI once with")
-        print("  ?token=<that value>, or pass --allow-insecure if this network is trusted.\n")
+    # Non-local service binding requires a real access gate. A hosted service
+    # may use account sessions instead of the legacy shared UI_TOKEN, but only
+    # after an account already exists in its persistent database. This keeps a
+    # brand-new public deployment from letting the first visitor claim owner.
+    account_auth_ready = False
+    if config.HOSTED and not config.UI_TOKEN:
+        try:
+            from memory.accounts import accounts_exist
+            account_auth_ready = accounts_exist()
+        except Exception:
+            account_auth_ready = False
+    if (not _loopback(args.host) and not config.UI_TOKEN and
+            not account_auth_ready and not args.allow_insecure):
+        print(f"\n  Refusing to serve on {args.host} with no access gate configured.")
+        print("  Set UI_TOKEN, bootstrap an owner account on persistent storage, or pass")
+        print("  --allow-insecure only when this network is trusted.\n")
         sys.exit(2)
 
     url = f"http://{args.host}:{args.port}"
-    if config.UI_TOKEN:
+    # A hosted URL is recorded by reverse proxies and deployment logs. Never
+    # put a hosted access token in that URL; the login form sends it in a POST
+    # body and stores it in an HttpOnly cookie.
+    if config.UI_TOKEN and not config.HOSTED:
         url += f"/?token={config.UI_TOKEN}"
     print("\n  AI Research Agent UI")
     print("  ─────────────────────────────────")
     print(f"  URL: {url}")
     if config.UI_TOKEN:
         print("  A token is required on every request (UI_TOKEN).")
+    elif account_auth_ready:
+        print("  Account authentication protects private application routes.")
     print("  Press Ctrl+C to stop.\n")
 
     if not args.no_browser:

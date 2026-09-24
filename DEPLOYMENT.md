@@ -45,7 +45,9 @@ These are not preferences; each one is a way for this to go wrong in public.
    finish at the code and the user runs it themselves.
 2. **`DATA_DIR` is a mounted volume.** The database, the backups and the key
    that decrypts stored API keys all live there. Without a volume, every deploy
-   quietly starts an empty product.
+   quietly starts an empty product. Railway mounts volumes as root, so the
+   image entrypoint fixes the mount-point ownership and immediately drops to
+   the unprivileged `researcher` user before starting Python.
 3. **`API_KEY_ENCRYPTION_KEY` is set in the environment** on any host whose
    disk can be replaced. Lose it and every user has to enter their provider key
    again. Generate one with
@@ -58,12 +60,22 @@ These are not preferences; each one is a way for this to go wrong in public.
 6. **An account exists, and you decide who else may make one.** The first
    account made becomes the owner and adopts the sessions already on the
    machine. Until someone signs up, the server is in local mode and a
-   `UI_TOKEN` is the only thing in the way. `ALLOW_SIGNUP` is off by default,
-   so sign up as the owner first and set `ALLOW_SIGNUP=1` only when the beta is
-   actually open.
-7. **The owner's `.env` API key is the owner's.** A member account with no key
-   of its own runs on the local model rather than spending the operator's
-   credit. Nothing needs configuring for that; it is worth knowing.
+   `UI_TOKEN` is the only thing in the way. After the owner exists, remove the
+   bootstrap token: normal users authenticate with their own account, never a
+   shared token.
+7. **Transactional email is configured before signup opens.** Set
+   `PUBLIC_APP_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`,
+   `SMTP_PASSWORD`, `SMTP_FROM`, and `SMTP_STARTTLS`. On Railway Free, Trial,
+   or Hobby, set `RESEND_API_KEY` and `SMTP_FROM` instead because outbound SMTP
+   is unavailable. New accounts cannot sign
+   in until a one-use 24-hour verification link is consumed. Password-reset
+   links expire after 30 minutes and invalidate every older login cookie.
+   `ALLOW_SIGNUP` stays off if mail is unavailable.
+8. **Hosted inference has explicit precedence.** Model API OFF makes no remote
+   model call. With it ON, a member's selected BYOK key wins; without BYOK the
+   server uses `SHARED_FREE_PROVIDER` / `SHARED_FREE_MODEL`. For the default
+   Gemini route, `GEMINI_API_KEY` is required even on Google's free tier. This
+   server-side key is never returned to the browser or stored as user BYOK.
 
 ## Limits to be honest about
 
@@ -75,13 +87,13 @@ These are not preferences; each one is a way for this to go wrong in public.
   the allowance place is returned, the session is told why it stopped, and the
   page offers to resume (`memory/runs.py`). Deploys are therefore cheap but not
   invisible — a run in progress will need one click to continue.
-- **No managed credit.** Every run uses the user's own API key. The pricing
-  page says so, and ResearchAgentLab Credits are marked Coming Soon.
+- **The shared free route has provider quotas, not an SLA.** It never falls
+  through to a paid provider. If its quota or authentication fails, the run
+  preserves its state and asks the user to retry later or configure BYOK.
 - **Local models are not available on a hosted box.** Ollama and GGUF models
-  are for the copy someone runs themselves. A hosted run with no usable API key
-  therefore has nothing to fall back to and degrades to the data-template path,
-  which records itself as a degradation — worth knowing before reading a report
-  that came out of it.
+  are for the copy someone runs themselves. With Model API OFF, a hosted run
+  pauses before the next model-dependent phase. With it ON, a run uses BYOK or
+  the configured shared free route; it never silently chooses Anthropic.
 
 ## The application
 
@@ -91,15 +103,37 @@ docker run -p 8000:8000 -v researchagentlab-data:/data \
   -e HOSTED=1 \
   -e ALLOWED_HOSTS=app.researchagentlab.com \
   -e API_KEY_ENCRYPTION_KEY=... \
-  -e UI_TOKEN=... \
+  -e GEMINI_API_KEY=... \
+  -e SHARED_FREE_PROVIDER=gemini \
+  -e SHARED_FREE_MODEL=gemini-3.5-flash-lite \
+  -e PUBLIC_APP_URL=https://app.researchagentlab.com \
+  -e SMTP_HOST=smtp.example.com \
+  -e SMTP_PORT=587 \
+  -e SMTP_USERNAME=... \
+  -e SMTP_PASSWORD=... \
+  -e 'SMTP_FROM=ResearchAgentLab <accounts@researchagentlab.com>' \
+  -e SMTP_STARTTLS=1 \
   researchagentlab
 ```
+
+Keep `UI_TOKEN` only for the first owner bootstrap, then remove it. Set
+`ALLOW_SIGNUP=1` only after a real verification email has been received and
+the reset flow has been exercised end to end.
 
 `/health` answers for the host's health check and leaks nothing. The image
 carries no data, no `.env` and no model files (`.dockerignore`).
 
 On Railway or Render: point it at this repository, add a volume mounted at
 `/data`, set the variables above, and let the platform provide `PORT`.
+
+For Railway CLI authentication, use the names Railway recognizes:
+
+- `RAILWAY_API_TOKEN` for an account/workspace token that may create and manage
+  projects;
+- `RAILWAY_TOKEN` for a token scoped to an existing project.
+
+`RAILWAY_API_KEY` is not a Railway CLI authentication variable. Do not copy a
+token into the repository or pass it on a command line.
 
 ## The public site
 

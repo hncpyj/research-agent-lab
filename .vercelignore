@@ -1,0 +1,11 @@
+# The Vercel project uses web/ as its Root Directory. Keep the deployment
+# context limited to public-site source so local research data, logs, models,
+# secrets, and backend state are never uploaded to the frontend builder.
+/*
+!/web
+
+/web/node_modules
+/web/dist
+/web/.vercel
+/web/.env*
+/web/.figma/design-context

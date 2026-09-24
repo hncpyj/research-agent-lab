@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 DEFAULTS: dict = {
     "use_api": None,            # None -> config.USE_API
     "daily_budget_usd": None,   # None -> config.API_DAILY_BUDGET_USD
-    "api_provider": None,       # None -> config.API_PROVIDER (anthropic|openai|gemini)
+    "api_provider": None,       # None -> config.API_PROVIDER (gemini by default)
     "api_models": None,         # None -> each provider's default; {provider: model id}
     "local_model": None,        # None -> config.OLLAMA_MODEL
     "local_embed_model": None,  # None -> config.OLLAMA_EMBED_MODEL
@@ -64,9 +64,9 @@ def daily_budget_usd() -> float:
 
 
 def api_provider() -> str:
-    """Which paid backend a new run uses: anthropic, openai or gemini."""
+    """Preferred BYOK backend for a new run; hosted no-key uses shared Gemini."""
     value = load()["api_provider"]
-    return (value or config.API_PROVIDER or "anthropic").strip().lower()
+    return (value or config.API_PROVIDER or "gemini").strip().lower()
 
 
 def api_model(provider: str | None = None) -> str:

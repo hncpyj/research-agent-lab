@@ -195,6 +195,10 @@ class NoteDB:
             "ALTER TABLE research_sessions ADD COLUMN owner_id TEXT NOT NULL DEFAULT ''",
             # Which project this session is filed under; empty means none yet.
             "ALTER TABLE research_sessions ADD COLUMN project_id TEXT NOT NULL DEFAULT ''",
+            # Model-inference permission and selected BYOK provider belong to
+            # the session, so refresh, reconnect and resume cannot change them.
+            "ALTER TABLE research_sessions ADD COLUMN model_api_enabled INTEGER",
+            "ALTER TABLE research_sessions ADD COLUMN model_provider TEXT",
             "ALTER TABLE hypotheses ADD COLUMN domain TEXT",
             "ALTER TABLE papers ADD COLUMN doi TEXT",
             "ALTER TABLE papers ADD COLUMN source TEXT",
@@ -222,6 +226,8 @@ class NoteDB:
         constraints: str = "",
         owner_id: str = "",
         project_id: str = "",
+        model_api_enabled: bool | None = None,
+        model_provider: str = "",
     ) -> str:
         session_id = str(uuid.uuid4())
         ts = _now()
@@ -230,10 +236,23 @@ class NoteDB:
                 """
                 INSERT INTO research_sessions
                     (session_id, topic, status, created_at, updated_at,
-                     background, goals, constraints, owner_id, project_id)
-                VALUES (?, ?, 'started', ?, ?, ?, ?, ?, ?, ?)
+                     background, goals, constraints, owner_id, project_id,
+                     model_api_enabled, model_provider)
+                VALUES (?, ?, 'started', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, topic, ts, ts, background, goals, constraints, owner_id, project_id),
+                (
+                    session_id,
+                    topic,
+                    ts,
+                    ts,
+                    background,
+                    goals,
+                    constraints,
+                    owner_id,
+                    project_id,
+                    None if model_api_enabled is None else int(model_api_enabled),
+                    model_provider or "",
+                ),
             )
         logger.info("Session created: %s", session_id)
         return session_id

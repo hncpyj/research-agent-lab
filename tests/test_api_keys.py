@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import config
-from memory import accounts, api_keys
+from memory import account_email, accounts, api_keys
 
 REAL_KEY = "test-anthropic-key-not-a-secret"
 
@@ -32,11 +32,28 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "UI_TOKEN", "")
     monkeypatch.setattr(config, "ALLOW_SIGNUP", True)
+    monkeypatch.setattr(config, "SMTP_HOST", "smtp.test")
+    monkeypatch.setattr(config, "SMTP_FROM", "accounts@example.test")
+    monkeypatch.setattr(config, "PUBLIC_APP_URL", "https://app.example.test")
     monkeypatch.delenv("API_KEY_ENCRYPTION_KEY", raising=False)
+
+    outbox = []
+    monkeypatch.setattr(account_email, "send_verification",
+                        lambda email, token: outbox.append(token))
 
     import ui.app as ui_app
     ui_app._LOGIN_ATTEMPTS.clear()
-    return TestClient(ui_app.app)
+    ui_app._SIGNUP_ATTEMPTS.clear()
+    test_client = TestClient(ui_app.app)
+    test_client.auth_outbox = outbox
+    return test_client
+
+
+def _verified_signup(client, email):
+    response = client.post("/api/auth/signup",
+                           json={"email": email, "password": "Good!Password123"})
+    assert response.status_code == 202
+    return client.post("/api/auth/verify", json={"token": client.auth_outbox[-1]})
 
 
 # --- at rest ---------------------------------------------------------------------
@@ -97,7 +114,7 @@ def test_the_listing_shows_a_hint_and_never_the_key(store):
     api_keys.store("u1", "anthropic", REAL_KEY)
     listed = api_keys.list_keys("u1")
     assert [k.provider for k in listed] == ["anthropic"]
-    assert listed[0].hint == "sk-ant…mnop"
+    assert listed[0].hint == "test-a…cret"
     assert REAL_KEY not in str([k.as_dict() for k in listed])
 
 
@@ -150,8 +167,8 @@ def test_on_your_own_machine_the_env_key_is_yours(store, monkeypatch):
 
 def test_a_member_without_a_key_does_not_spend_the_servers(store, monkeypatch):
     monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "sk-ant-the-operators-key")
-    owner = accounts.create_user("owner@example.com", "a-good-password")
-    member = accounts.create_user("member@example.com", "a-good-password")
+    owner = accounts.create_user("owner@example.com", "Good!Password123")
+    member = accounts.create_user("member@example.com", "Good!Password123")
 
     assert api_keys.key_for(owner.user_id, "anthropic") == "sk-ant-the-operators-key"
     assert api_keys.key_for(member.user_id, "anthropic") == ""     # local model instead
@@ -166,8 +183,8 @@ def test_a_run_uses_the_key_of_whoever_it_belongs_to(store, monkeypatch):
     from models import providers
 
     monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "sk-ant-the-operators-key")
-    accounts.create_user("owner@example.com", "a-good-password")
-    member = accounts.create_user("member@example.com", "a-good-password")
+    accounts.create_user("owner@example.com", "Good!Password123")
+    member = accounts.create_user("member@example.com", "Good!Password123")
     api_keys.store(member.user_id, "anthropic", REAL_KEY)
 
     used = {}
@@ -191,7 +208,7 @@ def test_the_api_never_hands_back_a_key(client):
     listed = client.get("/api/keys")
     assert REAL_KEY not in listed.text
     anthropic = [p for p in listed.json()["providers"] if p["provider"] == "anthropic"][0]
-    assert anthropic["stored"]["hint"] == "sk-ant…mnop"
+    assert anthropic["stored"]["hint"] == "test-a…cret"
     assert anthropic["usable"] is True
 
 
@@ -210,21 +227,21 @@ def test_a_bad_key_is_refused_with_the_reason_shown(client):
 
 
 def test_one_account_cannot_see_or_touch_another_accounts_keys(client):
-    client.post("/api/auth/signup", json={"email": "owner@example.com", "password": "a-good-password"})
+    _verified_signup(client, "owner@example.com")
     client.put("/api/keys/anthropic", json={"key": REAL_KEY})
     client.post("/api/auth/logout")
 
-    client.post("/api/auth/signup", json={"email": "member@example.com", "password": "a-good-password"})
+    _verified_signup(client, "member@example.com")
     mine = client.get("/api/keys").json()
     assert all(p["stored"] is None for p in mine["providers"])
     assert mine["server_key_allowed"] is False           # the operator's key is not theirs
 
     client.delete("/api/keys/anthropic")                 # cannot remove someone else's
-    owner = accounts.verify_password("owner@example.com", "a-good-password")
+    owner = accounts.verify_password("owner@example.com", "Good!Password123")
     assert api_keys.get(owner.user_id, "anthropic") == REAL_KEY
 
 
 def test_signed_out_nobody_can_read_the_keys(client):
-    client.post("/api/auth/signup", json={"email": "owner@example.com", "password": "a-good-password"})
+    _verified_signup(client, "owner@example.com")
     client.post("/api/auth/logout")
     assert client.get("/api/keys").status_code == 401

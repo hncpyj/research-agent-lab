@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import config
-from memory import accounts, paper_index, projects, provenance
+from memory import account_email, accounts, paper_index, projects, provenance
 from memory.accounts import User
 from memory.note_db import NoteDB
 
@@ -33,10 +33,26 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "EXPERIMENTS_DIR", tmp_path / "experiments")
     monkeypatch.setattr(config, "UI_TOKEN", "")
     monkeypatch.setattr(config, "ALLOW_SIGNUP", True)
+    monkeypatch.setattr(config, "SMTP_HOST", "smtp.test")
+    monkeypatch.setattr(config, "SMTP_FROM", "accounts@example.test")
+    monkeypatch.setattr(config, "PUBLIC_APP_URL", "https://app.example.test")
+    outbox = []
+    monkeypatch.setattr(account_email, "send_verification",
+                        lambda email, token: outbox.append(token))
     import ui.app as ui_app
     ui_app._runners.clear()
     ui_app._LOGIN_ATTEMPTS.clear()
-    return TestClient(ui_app.app)
+    ui_app._SIGNUP_ATTEMPTS.clear()
+    test_client = TestClient(ui_app.app)
+    test_client.auth_outbox = outbox
+    return test_client
+
+
+def _verified_signup(client, email):
+    response = client.post("/api/auth/signup",
+                           json={"email": email, "password": "Good!Password123"})
+    assert response.status_code == 202
+    return client.post("/api/auth/verify", json={"token": client.auth_outbox[-1]})
 
 
 def _free_user(user_id="u1"):
@@ -297,11 +313,11 @@ def test_the_page_can_read_the_chain_behind_a_session(client):
 
 
 def test_one_account_cannot_see_another_accounts_project(client):
-    client.post("/api/auth/signup", json={"email": "owner@example.com", "password": "a-good-password"})
+    _verified_signup(client, "owner@example.com")
     mine = client.post("/api/projects", json={"name": "Mine"}).json()
     client.post("/api/auth/logout")
 
-    client.post("/api/auth/signup", json={"email": "other@example.com", "password": "a-good-password"})
+    _verified_signup(client, "other@example.com")
     assert client.get("/api/projects").json()["projects"] == []
     assert client.get(f"/api/projects/{mine['project_id']}/papers").status_code == 404
     assert client.patch(f"/api/projects/{mine['project_id']}",
@@ -309,8 +325,8 @@ def test_one_account_cannot_see_another_accounts_project(client):
 
 
 def test_the_limit_is_explained_rather_than_just_refused(client):
-    client.post("/api/auth/signup", json={"email": "owner@example.com", "password": "a-good-password"})
-    accounts.set_plan(accounts.verify_password("owner@example.com", "a-good-password").user_id, "free")
+    _verified_signup(client, "owner@example.com")
+    accounts.set_plan(accounts.verify_password("owner@example.com", "Good!Password123").user_id, "free")
     for i in range(3):
         assert client.post("/api/projects", json={"name": f"P{i}"}).status_code == 200
 

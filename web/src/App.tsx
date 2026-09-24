@@ -6,12 +6,8 @@ import OpenSource from './pages/public/OpenSource';
 import Pricing from './pages/public/Pricing';
 import Privacy from './pages/public/Privacy';
 import Terms from './pages/public/Terms';
+import HostedAppRedirect from './pages/auth/HostedAppRedirect';
 
-/**
- * This deployment is intentionally static and informational. The design-only
- * account and application screens under src/pages/auth and src/pages/app are
- * not imported or routed into the public bundle.
- */
 export default function App() {
   return (
     <BrowserRouter>
@@ -25,9 +21,12 @@ export default function App() {
         <Route path="/pricing" element={<Navigate to="/availability" replace />} />
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/terms" element={<Terms />} />
-        <Route path="/login" element={<Navigate to="/availability" replace />} />
-        <Route path="/signup" element={<Navigate to="/availability" replace />} />
-        <Route path="/app/*" element={<Navigate to="/availability" replace />} />
+        <Route path="/login" element={<HostedAppRedirect path="/login" />} />
+        <Route path="/signup" element={<HostedAppRedirect path="/signup" />} />
+        <Route path="/verify-email" element={<HostedAppRedirect path="/verify-email" />} />
+        <Route path="/forgot-password" element={<HostedAppRedirect path="/forgot-password" />} />
+        <Route path="/reset-password" element={<HostedAppRedirect path="/reset-password" />} />
+        <Route path="/app/*" element={<HostedAppRedirect path="/app" />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

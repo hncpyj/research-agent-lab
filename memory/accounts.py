@@ -37,9 +37,17 @@ logger = logging.getLogger(__name__)
 
 SESSION_COOKIE = "ra_user"
 SESSION_DAYS = 30
-MIN_PASSWORD = 10           # long enough to matter, short enough to type
+MIN_PASSWORD = 12
+MAX_PASSWORD = 128
+VERIFY_TOKEN_TTL_S = 24 * 60 * 60
+RESET_TOKEN_TTL_S = 30 * 60
 _SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1}
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_COMMON_PASSWORDS = {
+    "password", "password123", "password123!", "qwerty123", "qwerty123!",
+    "letmein123", "welcome123", "admin123", "researchagentlab",
+}
+_DUMMY_PASSWORD_HASH: str | None = None
 
 
 class AccountError(ValueError):
@@ -53,10 +61,13 @@ class User:
     role: str            # owner (the first account) | member
     plan: str            # free | researcher
     created_at: str
+    email_verified: bool = True
+    auth_version: int = 1
 
     def as_dict(self) -> dict:
         return {"user_id": self.user_id, "email": self.email, "role": self.role,
-                "plan": self.plan, "created_at": self.created_at}
+                "plan": self.plan, "created_at": self.created_at,
+                "email_verified": self.email_verified}
 
 
 # --- storage -------------------------------------------------------------------
@@ -75,10 +86,39 @@ def _connect(db_path: Path | None = None) -> sqlite3.Connection:
             role          TEXT NOT NULL DEFAULT 'member',
             plan          TEXT NOT NULL DEFAULT 'free',
             created_at    TEXT NOT NULL,
-            last_login_at TEXT
+            last_login_at TEXT,
+            email_verified_at TEXT,
+            auth_version INTEGER NOT NULL DEFAULT 1
         )
         """
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "email_verified_at" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN email_verified_at TEXT")
+        # Existing accounts were created behind the shared bootstrap token.
+        # Grandfather only those rows during this one-way migration so the
+        # operator is not locked out; every account created by the new schema
+        # starts unverified and must use the email link.
+        conn.execute("UPDATE users SET email_verified_at = ? WHERE email_verified_at IS NULL",
+                     (_now(),))
+    if "auth_version" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 1")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS account_tokens (
+            token_hash TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            used_at INTEGER,
+            FOREIGN KEY(user_id) REFERENCES users(user_id)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_account_tokens_user_purpose "
+                 "ON account_tokens(user_id, purpose)")
+    conn.commit()
     return conn
 
 
@@ -104,9 +144,44 @@ def _password_matches(password: str, stored: str) -> bool:
     return hmac.compare_digest(candidate.hex(), digest_hex)
 
 
+def _dummy_password_hash() -> str:
+    """Keep unknown-email login timing close to a real password check."""
+    global _DUMMY_PASSWORD_HASH
+    if _DUMMY_PASSWORD_HASH is None:
+        _DUMMY_PASSWORD_HASH = _hash_password("Dummy!Password123")
+    return _DUMMY_PASSWORD_HASH
+
+
 def _row_to_user(row: sqlite3.Row) -> User:
     return User(user_id=row["user_id"], email=row["email"], role=row["role"],
-                plan=row["plan"], created_at=row["created_at"])
+                plan=row["plan"], created_at=row["created_at"],
+                email_verified=bool(row["email_verified_at"]),
+                auth_version=int(row["auth_version"]))
+
+
+def validate_password(password: str, email: str = "") -> None:
+    """Reject weak or abusive password inputs before invoking scrypt."""
+    password = password or ""
+    if len(password) < MIN_PASSWORD:
+        raise AccountError(f"Use at least {MIN_PASSWORD} characters.")
+    if len(password) > MAX_PASSWORD:
+        raise AccountError(f"Use no more than {MAX_PASSWORD} characters.")
+    if password != password.strip():
+        raise AccountError("Do not start or end the password with whitespace.")
+    if password.casefold() in _COMMON_PASSWORDS:
+        raise AccountError("Choose a less common password.")
+    requirements = (
+        (any(c.islower() for c in password), "a lowercase letter"),
+        (any(c.isupper() for c in password), "an uppercase letter"),
+        (any(c.isdigit() for c in password), "a number"),
+        (any(not c.isalnum() for c in password), "a symbol"),
+    )
+    missing = [label for present, label in requirements if not present]
+    if missing:
+        raise AccountError("Add " + ", ".join(missing) + ".")
+    local = (email or "").strip().lower().split("@", 1)[0]
+    if len(local) >= 3 and local in password.casefold():
+        raise AccountError("Do not include your email name in the password.")
 
 
 def accounts_exist(db_path: Path | None = None) -> bool:
@@ -135,8 +210,7 @@ def create_user(email: str, password: str, db_path: Path | None = None) -> User:
     email = (email or "").strip().lower()
     if not _EMAIL.match(email):
         raise AccountError("That does not look like an email address.")
-    if len(password or "") < MIN_PASSWORD:
-        raise AccountError(f"Use a password of at least {MIN_PASSWORD} characters.")
+    validate_password(password, email)
 
     conn = _connect(db_path)
     try:
@@ -174,7 +248,10 @@ def verify_password(email: str, password: str, db_path: Path | None = None) -> U
     try:
         row = conn.execute("SELECT * FROM users WHERE email = ?",
                            ((email or "").strip().lower(),)).fetchone()
-        if row is None or not _password_matches(password or "", row["password_hash"]):
+        if row is None:
+            _password_matches(password or "", _dummy_password_hash())
+            return None
+        if not _password_matches(password or "", row["password_hash"]):
             return None
         conn.execute("UPDATE users SET last_login_at = ? WHERE user_id = ?", (_now(), row["user_id"]))
         conn.commit()
@@ -188,6 +265,107 @@ def get_user(user_id: str, db_path: Path | None = None) -> User | None:
     try:
         row = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
         return _row_to_user(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_user_by_email(email: str, db_path: Path | None = None) -> User | None:
+    conn = _connect(db_path)
+    try:
+        row = conn.execute("SELECT * FROM users WHERE email = ?",
+                           ((email or "").strip().lower(),)).fetchone()
+        return _row_to_user(row) if row else None
+    finally:
+        conn.close()
+
+
+def issue_account_token(user_id: str, purpose: str, db_path: Path | None = None) -> str:
+    if purpose not in {"verify_email", "reset_password"}:
+        raise ValueError("Unknown account-token purpose")
+    raw = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    now = int(time.time())
+    ttl = VERIFY_TOKEN_TTL_S if purpose == "verify_email" else RESET_TOKEN_TTL_S
+    conn = _connect(db_path)
+    try:
+        conn.execute("UPDATE account_tokens SET used_at = ? "
+                     "WHERE user_id = ? AND purpose = ? AND used_at IS NULL",
+                     (now, user_id, purpose))
+        conn.execute("INSERT INTO account_tokens "
+                     "(token_hash, user_id, purpose, created_at, expires_at) "
+                     "VALUES (?, ?, ?, ?, ?)",
+                     (digest, user_id, purpose, now, now + ttl))
+        conn.commit()
+    finally:
+        conn.close()
+    return raw
+
+
+def _token_row(conn: sqlite3.Connection, raw: str, purpose: str):
+    digest = hashlib.sha256((raw or "").encode()).hexdigest()
+    return conn.execute(
+        "SELECT t.*, u.email FROM account_tokens t JOIN users u ON u.user_id = t.user_id "
+        "WHERE t.token_hash = ? AND t.purpose = ? AND t.used_at IS NULL AND t.expires_at >= ?",
+        (digest, purpose, int(time.time())),
+    ).fetchone()
+
+
+def verify_email_token(raw: str, db_path: Path | None = None) -> User | None:
+    conn = _connect(db_path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = _token_row(conn, raw, "verify_email")
+        if row is None:
+            return None
+        now = int(time.time())
+        conn.execute("UPDATE account_tokens SET used_at = ? WHERE token_hash = ?",
+                     (now, row["token_hash"]))
+        conn.execute("UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?) "
+                     "WHERE user_id = ?", (_now(), row["user_id"]))
+        conn.commit()
+        user = conn.execute("SELECT * FROM users WHERE user_id = ?", (row["user_id"],)).fetchone()
+        return _row_to_user(user)
+    finally:
+        conn.close()
+
+
+def reset_password_with_token(raw: str, new_password: str,
+                              db_path: Path | None = None) -> User | None:
+    conn = _connect(db_path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = _token_row(conn, raw, "reset_password")
+        if row is None:
+            return None
+        validate_password(new_password, row["email"])
+        now = int(time.time())
+        conn.execute("UPDATE account_tokens SET used_at = ? "
+                     "WHERE user_id = ? AND used_at IS NULL", (now, row["user_id"]))
+        conn.execute("UPDATE users SET password_hash = ?, auth_version = auth_version + 1, "
+                     "email_verified_at = COALESCE(email_verified_at, ?) WHERE user_id = ?",
+                     (_hash_password(new_password), _now(), row["user_id"]))
+        conn.commit()
+        user = conn.execute("SELECT * FROM users WHERE user_id = ?", (row["user_id"],)).fetchone()
+        return _row_to_user(user)
+    finally:
+        conn.close()
+
+
+def change_password(user_id: str, current_password: str, new_password: str,
+                    db_path: Path | None = None) -> User | None:
+    conn = _connect(db_path)
+    try:
+        row = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if row is None or not _password_matches(current_password or "", row["password_hash"]):
+            return None
+        validate_password(new_password, row["email"])
+        conn.execute("UPDATE users SET password_hash = ?, auth_version = auth_version + 1 "
+                     "WHERE user_id = ?", (_hash_password(new_password), user_id))
+        conn.execute("UPDATE account_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL",
+                     (int(time.time()), user_id))
+        conn.commit()
+        updated = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        return _row_to_user(updated)
     finally:
         conn.close()
 
@@ -234,7 +412,7 @@ def _secret() -> bytes:
 def issue_cookie(user: User, days: int = SESSION_DAYS) -> str:
     """A signed 'this is who you are, until then' string."""
     expires = int(time.time()) + days * 86400
-    payload = f"{user.user_id}.{expires}"
+    payload = f"{user.user_id}.{user.auth_version}.{expires}"
     signature = hmac.new(_secret(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{signature}"
 
@@ -244,10 +422,10 @@ def user_from_cookie(value: str | None, db_path: Path | None = None) -> User | N
     if not value:
         return None
     try:
-        user_id, expires, signature = value.rsplit(".", 2)
+        user_id, auth_version, expires, signature = value.rsplit(".", 3)
     except ValueError:
         return None
-    expected = hmac.new(_secret(), f"{user_id}.{expires}".encode(), hashlib.sha256).hexdigest()
+    expected = hmac.new(_secret(), f"{user_id}.{auth_version}.{expires}".encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected):
         return None
     try:
@@ -255,4 +433,7 @@ def user_from_cookie(value: str | None, db_path: Path | None = None) -> User | N
             return None
     except ValueError:
         return None
-    return get_user(user_id, db_path)
+    user = get_user(user_id, db_path)
+    if user is None or str(user.auth_version) != auth_version:
+        return None
+    return user

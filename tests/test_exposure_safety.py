@@ -117,6 +117,7 @@ def client(monkeypatch):
     import ui.app as ui_app
 
     monkeypatch.setattr(config, "UI_TOKEN", "s3cret-token")
+    monkeypatch.setattr(config, "HOSTED", False)
     return TestClient(ui_app.app)
 
 
@@ -146,6 +147,13 @@ def test_the_token_opens_the_door_and_is_remembered(client):
     assert client.get("/api/sessions", params={"token": "wrong"}).status_code == 401
 
 
+def test_a_hosted_server_refuses_query_string_tokens(client, monkeypatch):
+    monkeypatch.setattr(config, "HOSTED", True)
+    assert client.get("/api/sessions", params={"token": "s3cret-token"}).status_code == 401
+    assert client.get("/api/sessions",
+                      headers={"Authorization": "Bearer s3cret-token"}).status_code == 200
+
+
 def test_a_websocket_without_the_token_is_closed(client):
     from starlette.websockets import WebSocketDisconnect
 
@@ -165,6 +173,22 @@ def test_the_server_refuses_to_serve_the_network_without_a_token(monkeypatch):
     with pytest.raises(SystemExit) as exit_info:
         run_ui.main()
     assert exit_info.value.code == 2
+
+
+def test_hosted_startup_does_not_print_the_access_token(monkeypatch, capsys):
+    import run_ui
+    import uvicorn
+
+    monkeypatch.setattr(config, "HOSTED", True)
+    monkeypatch.setattr(config, "UI_TOKEN", "never-print-this-token")
+    monkeypatch.setattr(sys, "argv", ["run_ui.py", "--host", "0.0.0.0", "--no-browser"])
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
+
+    run_ui.main()
+
+    output = capsys.readouterr().out
+    assert "never-print-this-token" not in output
+    assert "?token=" not in output
 
 
 # --- once it is on the internet ------------------------------------------------

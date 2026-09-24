@@ -130,7 +130,9 @@ OLLAMA_EMBED_MODEL: str = os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text
 # ---------------------------------------------------------------------------
 # The UI has no accounts: anyone who can reach the port can start runs, read
 # every session and remove them. Set UI_TOKEN to require it on every request
-# (Authorization: Bearer, a ra_token cookie, or ?token= once per browser).
+# (Authorization: Bearer or a ra_token cookie). Local mode also accepts
+# ?token= once per browser for backwards compatibility; hosted mode does not,
+# because URLs are commonly retained in proxy logs and browser history.
 # run_ui.py refuses to bind to a non-loopback address without one.
 UI_TOKEN: str = os.environ.get("UI_TOKEN", "")
 
@@ -138,17 +140,28 @@ UI_TOKEN: str = os.environ.get("UI_TOKEN", "")
 # server leaves this off: the owner signs up once, and nobody else can.
 ALLOW_SIGNUP: bool = os.environ.get("ALLOW_SIGNUP", "0") not in ("0", "false", "False")
 
+# Hosted account email. Signup should remain closed until a sender is
+# configured. PUBLIC_APP_URL receives verification and password-reset links.
+PUBLIC_APP_URL: str = os.environ.get("PUBLIC_APP_URL", "http://127.0.0.1:8000").rstrip("/")
+SMTP_HOST: str = os.environ.get("SMTP_HOST", "").strip()
+SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "").strip()
+SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM: str = os.environ.get("SMTP_FROM", "").strip()
+SMTP_STARTTLS: bool = os.environ.get("SMTP_STARTTLS", "1") not in ("0", "false", "False")
+RESEND_API_KEY: str = os.environ.get("RESEND_API_KEY", "").strip()
+
 # ---------------------------------------------------------------------------
-# Paid API (Anthropic, OpenAI or Gemini) — see models/providers.py
+# Model inference APIs (Anthropic, OpenAI or Gemini) — see models/providers.py
 # ---------------------------------------------------------------------------
 # Startup default for the Web UI's API toggle. Set USE_API=0 to keep every
 # phase on the local model even across server restarts — the toggle itself
 # is in-memory, and used to fall back to "on" whenever the server restarted.
 USE_API: bool = os.environ.get("USE_API", "1") not in ("0", "false", "False")
 
-# Which paid backend a run uses when the API is on: anthropic | openai | gemini.
-# The settings page can change this while the server runs; keys stay in .env.
-API_PROVIDER: str = os.environ.get("API_PROVIDER", "anthropic").strip().lower()
+# Preferred BYOK backend for new sessions: anthropic | openai | gemini.
+# Hosted users without a key for their selected provider use SHARED_FREE_PROVIDER.
+API_PROVIDER: str = os.environ.get("API_PROVIDER", "gemini").strip().lower()
 
 ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
@@ -157,7 +170,15 @@ GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_AP
 # Model IDs — switch to claude-opus-4-6 for highest quality
 API_MODEL_DEFAULT: str = os.environ.get("API_MODEL", "claude-sonnet-4-5")
 OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-5")
-GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+
+# Hosted users without a BYOK key use this server-owned free-tier provider.
+# The key stays server-side and is never returned by an HTTP or WebSocket API.
+# Gemini's free tier still requires a Google AI Studio API key.
+SHARED_FREE_PROVIDER: str = os.environ.get("SHARED_FREE_PROVIDER", "gemini").strip().lower()
+SHARED_FREE_MODEL: str = os.environ.get(
+    "SHARED_FREE_MODEL", "gemini-3.5-flash-lite"
+).strip()
 
 # Both OpenAI and Gemini are called through the OpenAI SDK: Google publishes an
 # OpenAI-compatible endpoint (https://ai.google.dev/gemini-api/docs/openai), so
@@ -171,7 +192,7 @@ GEMINI_BASE_URL: str = os.environ.get(
 # 8192 prevents generated Python files from being truncated mid-function
 API_MAX_TOKENS: int = 8192
 
-# Most this may spend on the Anthropic API in one day (UTC-naive local
+# Most this may spend on billed model APIs in one day (UTC-naive local
 # midnight), measured from the api_usage_log table so it survives a restart.
 # Past the cap every call goes to the local model instead. 0 = no cap.
 API_DAILY_BUDGET_USD: float = float(os.environ.get("API_DAILY_BUDGET_USD", "0"))

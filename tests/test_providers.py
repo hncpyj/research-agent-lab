@@ -71,6 +71,60 @@ def test_a_provider_without_a_key_cannot_be_built(env):
         providers.build("openai")
 
 
+def test_anthropic_dry_run_is_the_exact_production_request_shape():
+    """The offline diagnostic and live sender share one request builder."""
+    messages = [{"role": "user", "content": "Reply with the single word: ready"}]
+
+    request = providers.anthropic_request_kwargs(
+        model="claude-sonnet-4-5", system="", messages=messages,
+        max_tokens=4, temperature=0.0)
+
+    assert request == {
+        "model": "claude-sonnet-4-5",
+        "system": "",
+        "messages": messages,
+        "max_tokens": 4,
+        "temperature": 0.0,
+    }
+    assert request["messages"] is not messages
+    assert not ({"top_p", "top_k", "thinking", "output_config", "tools",
+                 "tool_choice", "response_schema"} & request.keys())
+
+
+def test_anthropic_sender_uses_the_shared_dry_run_builder(monkeypatch):
+    built = {}
+
+    def fake_builder(**kwargs):
+        built.update(kwargs)
+        return {"model": "sentinel-model", "messages": []}
+
+    class _Messages:
+        def create(self, **kwargs):
+            assert kwargs == {"model": "sentinel-model", "messages": []}
+            return type("Response", (), {
+                "content": [type("Block", (), {"text": "ready"})()],
+                "usage": type("Usage", (), {"input_tokens": 3,
+                                               "output_tokens": 1})(),
+            })()
+
+    provider = object.__new__(providers.AnthropicProvider)
+    provider.model = "configured-model"
+    provider._client = type("Client", (), {"messages": _Messages()})()
+    monkeypatch.setattr(providers, "anthropic_request_kwargs", fake_builder)
+
+    result = provider.send("system", [{"role": "user", "content": "prompt"}],
+                           4, 0.0)
+
+    assert built == {
+        "model": "configured-model",
+        "system": "system",
+        "messages": [{"role": "user", "content": "prompt"}],
+        "max_tokens": 4,
+        "temperature": 0.0,
+    }
+    assert result == ("ready", 3, 1)
+
+
 def test_gemini_is_reached_through_the_openai_endpoint(env, monkeypatch):
     """No second SDK: Google publishes an OpenAI-compatible endpoint."""
     monkeypatch.setattr(config, "GEMINI_API_KEY", "key-abc")

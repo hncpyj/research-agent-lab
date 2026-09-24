@@ -14,6 +14,14 @@ Public project site: **https://researchagentlab.com/**
 
 ---
 
+## Paper
+
+[**Protocol Before Code: Stress-Testing Control Boundaries in Autonomous Research Agents**](Protocol_Before_Code.pdf)
+
+The paper describes how ResearchAgentLab freezes approved scientific intent, binds it to implementation artifacts, and checks conformance through execution and result acceptance. It also reports the bounded safety evaluations and frozen Choice-Set study summarized below.
+
+---
+
 ## Architecture at a glance
 
 ![ResearchAgentLab eight-stage research workflow](docs/assets/researchagentlab-stage-architecture.jpg)
@@ -174,6 +182,7 @@ Public evidence organization:
 
 - [`research_logs/README.md`](research_logs/README.md)
 - [`research_logs/paper_evidence/claims.md`](research_logs/paper_evidence/claims.md)
+- [`revision_evidence/PROVENANCE.md`](revision_evidence/PROVENANCE.md) — curated item-level exports and provenance for manuscript verification
 
 ---
 

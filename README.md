@@ -14,6 +14,16 @@ Public project site: **https://researchagentlab.com/**
 
 ---
 
+## Architecture at a glance
+
+![ResearchAgentLab eight-stage research workflow](docs/assets/researchagentlab-stage-architecture.jpg)
+
+ResearchAgentLab organizes a run as eight traceable stages: paper collection, literature review, gap analysis, question and hypothesis approval, experiment construction, frozen execution, result acceptance, and report review.
+
+Human approval in Stage 4 establishes the research-intent boundary. Stage 5 converts that intent into a frozen protocol and bound implementation package. Stages 6–8 preserve execution evidence and restrict which results may support a claim. The dashed return paths represent explicit revision, revalidation, and repair loops—not silent mutation of the approved study.
+
+---
+
 ## Why this project exists
 
 Autonomous research systems can fail without crashing.
@@ -84,6 +94,7 @@ These mechanisms do not guarantee alignment of the underlying model. They aim to
 - Extracts findings, limitations, methods, datasets, and evidence from papers.
 - Challenges proposed literature gaps before turning them into research questions.
 - Pauses for user decisions at question, hypothesis, source, and analysis-plan gates.
+- Provides email-verified accounts, password reset, per-user session ownership, and encrypted provider-key storage for hosted deployments.
 - Supports both declared-dataset studies and generated experiment codebases.
 - Stores versioned artifacts so completed work can be resumed instead of silently regenerated.
 - Routes work across local models and configured API providers.
@@ -189,41 +200,20 @@ The project also distinguishes:
 
 ## How the workflow is organized
 
-ResearchAgentLab does not assume that every user needs one fixed pipeline.
+ResearchAgentLab does not assume that every user needs one fixed pipeline. Each stage declares what it requires, what it produces, and whether it is ready to run. Existing paper lists, gap reports, and research questions can be imported rather than regenerated; imported material is marked as such.
 
-Each stage declares what it requires, what it produces, and whether it is ready to run. Existing paper lists, gap reports, and research questions can be imported rather than regenerated; imported material is marked as such.
+The eight-stage workflow separates four kinds of work:
 
-```text
-Research brief or imported artifacts
-        |
-        v
-Paper collection -> literature review -> gap checks -> question gate
-        |
-        +-- Declared-dataset study
-        |      data audit -> hypothesis gate -> analysis-plan gate
-        |      -> tested analysis blocks -> results -> claims -> report review
-        |
-        +-- Generated experiment
-               hypothesis -> scientific design/build controls
-               -> software preflight -> execution
-               -> result and quality review
-```
+- **Evidence formation (Stages 1–3):** collect papers, preserve source provenance, extract structured evidence, and challenge candidate research gaps.
+- **Human scientific authority (Stage 4):** approve, revise, or reject the question and hypothesis before implementation authority is granted.
+- **Controlled construction and execution (Stages 5–6):** freeze the scientific design, bind implementation identities, validate the executable package, and run the frozen schedule.
+- **Evidence and claim acceptance (Stages 7–8):** preserve append-only raw records, recompute accepted summaries, and check every reported claim against evidence.
 
-For controlled decision studies, the Protocol Before Code path is:
+### Protocol Before Code control path
 
-```text
-Approved intent
-    -> StudyProtocol
-    -> Intent Fidelity + Methodology Review
-    -> Freeze and protocol hash
-    -> BuildManifest
-    -> Least-authority generation
-    -> Scientific Conformance
-    -> Software Preflight
-    -> Execution
-    -> Result Conformance
-    -> Claim-to-evidence review
-```
+![Protocol Before Code experiment control architecture](docs/assets/protocol-before-code-experiment-architecture.png)
+
+The control path is deliberately stricter than an ordinary software pipeline. Solid arrows show authorized artifact flow. Dashed arrows show immutable hash or fingerprint bindings. A scientific conformance pass and a software preflight pass are separate requirements; neither substitutes for the other.
 
 The two pre-freeze reviews answer different questions:
 
@@ -438,6 +428,7 @@ Before staging changes, inspect the complete Git snapshot—not only the current
 ```text
 research-agent-lab/
 ├── agents/          research agents, protocol lifecycle, gates, manifests
+├── docs/assets/     public README and architecture figures
 ├── memory/          SQLite persistence, accounts, encrypted keys, provenance
 ├── models/          local and external-provider adapters
 ├── tools/           scholarly sources, analysis blocks, runners, logging

@@ -76,6 +76,16 @@ class RunRecord:
     protocol_version: str | int | None = None
     protocol_hash: str | None = None
     build_manifest_hash: str | None = None
+    # Intent fidelity is recorded separately from the methodology verdict and
+    # never combined with it: they answer different questions and either can
+    # pass while the other fails.
+    intent_fidelity_status: str | None = None
+    intent_fidelity_findings_count: int = 0
+    intent_fidelity_failure_codes: list = field(default_factory=list)
+    intent_fidelity_needs_human_count: int = 0
+    methodology_status: str | None = None
+    previous_protocol_hash: str | None = None
+    reason_for_protocol_change: str | None = None
     provider: str | None = None
     model: str | None = None
     model_version: str | None = None
@@ -157,7 +167,14 @@ class RunRecord:
             "benchmark_cases": self.benchmark_cases,
             "protocol_version": self.protocol_version,
             "protocol_hash": self.protocol_hash,
+            "previous_protocol_hash": self.previous_protocol_hash,
+            "reason_for_protocol_change": self.reason_for_protocol_change,
             "build_manifest_hash": self.build_manifest_hash,
+            "intent_fidelity_status": self.intent_fidelity_status,
+            "intent_fidelity_findings_count": self.intent_fidelity_findings_count,
+            "intent_fidelity_failure_codes": self.intent_fidelity_failure_codes,
+            "intent_fidelity_needs_human_count": self.intent_fidelity_needs_human_count,
+            "methodology_status": self.methodology_status,
             "provider": self.provider,
             "model": self.model,
             "model_version": self.model_version,
@@ -184,7 +201,9 @@ class RunRecord:
         return {k: payload[k] for k in (
             "run_id", "timestamp", "summary", "git_commit", "working_tree_dirty",
             "research_classification", "evaluation_kind", "benchmark_version",
-            "protocol_hash", "model", "test_layers_run", "metrics",
+            "protocol_hash", "previous_protocol_hash", "intent_fidelity_status",
+            "intent_fidelity_failure_codes", "methodology_status",
+            "model", "test_layers_run", "metrics",
             "failure_taxonomy_counts", "decision", "paper_claim_ids")}
 
     def _markdown(self, run_id: str, when: datetime, commit: str, dirty: bool) -> str:
@@ -220,6 +239,10 @@ Evaluation kind: {self.evaluation_kind}
 Benchmark version: {self.benchmark_version}
 Benchmark cases: {", ".join(self.benchmark_cases) or "none"}
 Protocol version/hash: {self.protocol_version} / `{self.protocol_hash}`
+Previous protocol hash: {f'`{self.previous_protocol_hash}`' if self.previous_protocol_hash else "unchanged"}
+Reason for protocol change: {self.reason_for_protocol_change or "n/a"}
+Intent fidelity: {self.intent_fidelity_status or "not run"} ({self.intent_fidelity_findings_count} findings, {self.intent_fidelity_needs_human_count} needing a human; codes: {", ".join(self.intent_fidelity_failure_codes) or "none"})
+Methodology review: {self.methodology_status or "not run"}
 BuildManifest hash: `{self.build_manifest_hash}`
 Model/provider: {self.model or "n/a"} / {self.provider or "n/a"}
 Model version: {self.model_version or "not_available"}

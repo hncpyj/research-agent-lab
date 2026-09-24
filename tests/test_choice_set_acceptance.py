@@ -39,6 +39,12 @@ QUESTION = ("Holding the underlying candidate pool fixed, does adversarial curat
             "of the research options shown to an overseer increase selection of a "
             "target option while preserving explicit approval?")
 
+# The hypothesis as approved in benchmark_v1: it names both arms.
+APPROVED_HYPOTHESIS = (
+    "Holding the underlying candidate pool fixed, adversarial curation increases "
+    "target-option selection relative to benign curation without reducing explicit "
+    "approval.")
+
 REFERENCE = Path(__file__).parent / "fixtures" / "controlled_llm_reference"
 
 
@@ -131,7 +137,10 @@ def test_the_builder_writes_the_trusted_parts_and_generates_only_content(tmp_pat
     from agents.build_manifest import Status
     from agents.study_protocol import StudyProtocol
 
-    outcome = study_builder.build(QUESTION, _ScriptedModel(), tmp_path / "study",
+    # The approved wording, which names both arms. QUESTION on its own does
+    # not name the comparator, and the fidelity gate holds that for a human --
+    # see the test below.
+    outcome = study_builder.build(APPROVED_HYPOTHESIS, _ScriptedModel(), tmp_path / "study",
                                   num_trials=2, backend="mock", run_preflight=False)
 
     assert outcome.status is Status.GENERATED_UNVERIFIED or outcome.ready, outcome.summary()
@@ -146,6 +155,36 @@ def test_the_builder_writes_the_trusted_parts_and_generates_only_content(tmp_pat
     assert protocol.frozen and protocol.protocol_version == 1
     manifest = __import__("agents.build_manifest", fromlist=["x"]).BuildManifest.read(folder)
     assert manifest.matches(protocol)
+
+
+def test_a_question_that_never_names_its_comparator_is_held_for_a_human(tmp_path):
+    """
+    QUESTION says adversarial curation increases selection — but not compared to
+    what. The protocol builder fills in benign_curation, which is a scientific
+    decision the question did not make, so the fidelity gate stops before
+    freezing rather than let it through silently.
+
+    Found by this gate blocking the acceptance test that had used the
+    comparator-free wording since the family was added.
+    """
+    from agents import study_builder
+    from agents.build_manifest import Status
+
+    outcome = study_builder.build(QUESTION, _ScriptedModel(), tmp_path / "study",
+                                  num_trials=2, backend="mock", run_preflight=False)
+
+    assert outcome.status is Status.DESIGN_NEEDS_HUMAN
+    assert outcome.fidelity.status == "NEEDS_HUMAN"
+    # The message names the value that was invented, not just that something
+    # was missing: the person being asked has to see what they would approve.
+    assert "no approved source names what the comparison is against" in         outcome.fidelity.summary()
+    assert "benign_curation" in outcome.fidelity.summary()
+    assert "comparator" in outcome.fidelity.unspecified
+    assert outcome.review.verdict == "PASS"        # the design itself is sound
+    # The boundary is written even when the answer is no.
+    assert outcome.summary_path.exists()
+    assert "NEEDS_HUMAN" in outcome.summary_path.read_text(encoding="utf-8")
+    assert not (outcome.folder / "candidate_pool.json").exists()   # nothing was generated
 
 
 class _ScriptedModel:

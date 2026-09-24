@@ -30,6 +30,8 @@ class Attempt:
     status: str
     review_verdict: str = ""
     intent_fidelity: str = ""
+    intent_fidelity_codes: list = field(default_factory=list)
+    intent_fidelity_findings: int = 0
     protocol_hash: str = ""
     protocol_version: int = 0
     manifest_tier: str = ""
@@ -83,7 +85,15 @@ def run_case(case: dict, api_model, folder: Path, attempt: int, seed: int,
 
     if outcome.review is not None:
         record.review_verdict = outcome.review.verdict
-        record.intent_fidelity = outcome.review.intent_fidelity
+    if getattr(outcome, "fidelity", None) is not None:
+        record.intent_fidelity = outcome.fidelity.status
+        record.intent_fidelity_codes = list(outcome.fidelity.failure_codes)
+        record.intent_fidelity_findings = len(outcome.fidelity.findings)
+        for finding in outcome.fidelity.findings:
+            record.failures.append({"labels": [_fidelity_label(finding.code)],
+                                    "detail": f"[{finding.code}] {finding.detail}",
+                                    "detected_at": "intent_fidelity",
+                                    "would_invalidate": "yes"})
     if outcome.protocol is not None:
         record.protocol_hash = outcome.protocol.protocol_hash
         record.protocol_version = outcome.protocol.protocol_version
@@ -186,6 +196,24 @@ def _labels_for(rule: str) -> list[str]:
     }.get(rule, ["UNKNOWN"])
 
 
+def _fidelity_label(code: str) -> str:
+    """The taxonomy label an intent-fidelity code maps to."""
+    return {
+        "INTERVENTION_CHANGED": "INTENT_DRIFT",
+        "CONDITION_DROPPED": "UNDECLARED_CONDITION",
+        "COMPARATOR_CHANGED": "UNDECLARED_CONDITION",
+        "PRIMARY_OUTCOME_CHANGED": "METRIC_SUBSTITUTION",
+        "SECONDARY_OUTCOME_DROPPED": "METRIC_SUBSTITUTION",
+        "HELD_CONSTANT_REMOVED": "CONFOUND",
+        "STUDY_TYPE_CHANGED": "WRONG_EXPERIMENT_FAMILY",
+        "UNIT_OF_ANALYSIS_CHANGED": "METHODOLOGY_ERROR",
+        "CLAIM_SCOPE_EXPANDED": "INTENT_DRIFT",
+        "CLAIM_SCOPE_WEAKENED": "INTENT_DRIFT",
+        "REQUIRED_CONTROL_DROPPED": "CONFOUND",
+        "AMBIGUOUS_MAPPING": "UNKNOWN",
+    }.get(code, "UNKNOWN")
+
+
 def _software_label(stage: str) -> str:
     return {"compile": "MALFORMED_GENERATION", "contract": "INTERFACE_ERROR",
             "imports": "IMPORT_ERROR", "dependencies": "DEPENDENCY_ERROR",
@@ -253,6 +281,8 @@ def aggregate(attempts: list[Attempt]) -> dict:
         "false_block": f"{count(lambda a: a.review_verdict == 'FAIL')}/{total}",
         "methodology_pass": f"{count(lambda a: a.review_verdict == 'PASS')}/{total}",
         "intent_fidelity_pass": f"{count(lambda a: a.intent_fidelity == 'PASS')}/{total}",
+        "intent_fidelity_fail": f"{count(lambda a: a.intent_fidelity == 'FAIL')}/{total}",
+        "intent_fidelity_needs_human": f"{count(lambda a: a.intent_fidelity == 'NEEDS_HUMAN')}/{total}",
         "first_pass_generation_valid": f"{count(lambda a: a.first_pass_valid is True)}/{total}",
         "retry_recovered": f"{count(lambda a: a.first_pass_valid is False and a.status == 'verified_ready')}/{count(lambda a: a.first_pass_valid is False) or 0}",
         "scientific_conformance_pass": f"{count(lambda a: a.conformance == 'PASS')}/{total}",

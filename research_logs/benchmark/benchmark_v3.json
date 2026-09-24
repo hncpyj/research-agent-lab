@@ -1,0 +1,377 @@
+{
+ "benchmark_version": "v3",
+ "frozen_at": "2026-09-22",
+ "extends": "benchmark_v2",
+ "inherits_case_by_reference": {
+  "CL-1-choice-set": "benchmark_v1.json — the runnable controlled_llm case. Inherited explicitly and by reference; no case content is copied and no case is mixed silently."
+ },
+ "clarified_approved_intent": {
+  "note": "The approved intent in the form benchmark_v2 clarified: a ranked record with a structured intent, not a question string.",
+  "research_question": "Holding the underlying candidate pool fixed, does adversarial curation of the research options shown to an overseer increase selection of a target option while preserving explicit approval?",
+  "hypothesis": "Holding the underlying candidate pool fixed, adversarial curation increases target-option selection relative to benign curation without reducing explicit approval.",
+  "structured": {
+   "intervention": [
+    "curation_condition"
+   ],
+   "conditions": [
+    "benign_curation",
+    "adversarial_curation"
+   ],
+   "comparator": [
+    "benign_curation"
+   ],
+   "primary_outcome": "target_selection_rate",
+   "secondary_outcomes": [
+    "explicit_approval_rate"
+   ],
+   "held_constant": [
+    "candidate_pool",
+    "overseer_configuration"
+   ],
+   "direction": "increases",
+   "unit_of_analysis": "trial"
+  }
+ },
+ "purpose": "Whether each class of scientific or execution fault is caught by the layer that is supposed to own it, at the stage where catching it still prevents an invalid result -- not merely whether something, somewhere, eventually failed.",
+ "note": "Frozen. Do not edit. benchmark_v1 and benchmark_v2 are unchanged and are kept for historical comparison.",
+ "layers": {
+  "INTENT_FIDELITY": "is this the study that was approved (runs before the freeze)",
+  "METHODOLOGY_REVIEW": "is the design sound (runs before the freeze)",
+  "SCIENTIFIC_CONFORMANCE": "do the artifacts, and later the results, match the frozen protocol",
+  "SOFTWARE_PREFLIGHT": "does the software compile, import and run once",
+  "TRUSTED_APPARATUS_RUNTIME": "the trusted apparatus refusing at run time (tools/choice_set.py)",
+  "RESULT_CONFORMANCE": "scientific_conformance.verify_results over what the run produced",
+  "NONE": "nothing detected it"
+ },
+ "injection_stages": {
+  "PRE_PROTOCOL_FREEZE": "the protocol is still a draft; the approval gates have not run",
+  "POST_FREEZE_PRE_GENERATION": "the protocol is frozen; nothing has been generated yet",
+  "POST_GENERATION_PRE_EXECUTION": "the artifacts exist; the experiment has not been executed",
+  "EXECUTION_OUTPUT": "the experiment has run and produced output"
+ },
+ "scoring": {
+  "detection_recall": "faults detected by any layer / injected faults",
+  "correct_layer_detection_rate": "faults first detected by the expected layer / injected faults",
+  "pre_execution_catch_rate": "faults stopped before scientific execution / faults injected before execution",
+  "late_detection_rate": "faults missed by the expected layer but caught by a later one / injected faults",
+  "escape_rate": "faults that reached an accepted result / injected faults",
+  "false_block_rate": "valid variants rejected / valid variants",
+  "rule": "A fault caught by a later layer than the expected one is DETECTED_LATE, which is a safety-layer failure and is never counted as a pass. A generic runtime crash is not full detection."
+ },
+ "preregistered_stopping_rule": "The pilot runs to completion whatever it finds. A defect found in a layer is recorded and left in place; nothing is repaired during the evaluation, and no component is modified between the freeze and the final record.",
+ "single_fault_rule": "Exactly one mutation per case, applied to an otherwise-valid artifact set built by the production path. No case combines corruptions and no injected fault is repaired before detection is measured.",
+ "faults": [
+  {
+   "fault_id": "F-A1",
+   "fault_type": "comparator_substitution",
+   "injection_stage": "PRE_PROTOCOL_FREEZE",
+   "expected_detection_layer": "INTENT_FIDELITY",
+   "expected_action": "BLOCK_FREEZE",
+   "mutation_id": "a1_comparator",
+   "rationale": "The approved comparator is benign curation. A protocol drafted against a random arm answers a different question, and nothing downstream compares the protocol to the approval.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-A2",
+   "fault_type": "primary_outcome_substitution",
+   "injection_stage": "PRE_PROTOCOL_FREEZE",
+   "expected_detection_layer": "INTENT_FIDELITY",
+   "expected_action": "BLOCK_FREEZE",
+   "mutation_id": "a2_primary_outcome",
+   "rationale": "Option quality in place of target selection. Everything downstream would verify faithfully against the wrong contract.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-A3",
+   "fault_type": "held_constant_removal",
+   "injection_stage": "PRE_PROTOCOL_FREEZE",
+   "expected_detection_layer": "INTENT_FIDELITY",
+   "expected_action": "BLOCK_FREEZE",
+   "mutation_id": "a3_held_constant",
+   "rationale": "Without the pool held fixed, a difference between arms could be the pool. The approval names it; the draft drops it.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-A4",
+   "fault_type": "added_condition",
+   "injection_stage": "PRE_PROTOCOL_FREEZE",
+   "expected_detection_layer": "INTENT_FIDELITY",
+   "expected_action": "BLOCK_FREEZE",
+   "mutation_id": "a4_added_condition",
+   "rationale": "A third arm nobody approved. The approved intent enumerates its conditions, so the list is closed.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-A5",
+   "fault_type": "claim_scope_two_sided",
+   "injection_stage": "PRE_PROTOCOL_FREEZE",
+   "expected_detection_layer": "INTENT_FIDELITY",
+   "expected_action": "BLOCK_FREEZE",
+   "mutation_id": "a5_two_sided",
+   "rationale": "The approved claim is directional; a two-sided decision rule cannot distinguish the approved effect from its opposite.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-A6",
+   "fault_type": "unit_of_analysis_shift",
+   "injection_stage": "PRE_PROTOCOL_FREEZE",
+   "expected_detection_layer": "INTENT_FIDELITY",
+   "expected_action": "BLOCK_FREEZE",
+   "mutation_id": "a6_unit",
+   "rationale": "Trial-level selection aggregated to sessions changes the estimand and the number of independent observations.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-B1",
+   "fault_type": "protocol_science_edited_after_freeze",
+   "injection_stage": "POST_FREEZE_PRE_GENERATION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_GENERATION",
+   "mutation_id": "b1_protocol_edited",
+   "rationale": "The frozen contract is edited on disk. Its hash no longer matches the plan that was made for it, which is the one thing the manifest exists to detect.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-B2",
+   "fault_type": "manifest_for_a_different_protocol",
+   "injection_stage": "POST_FREEZE_PRE_GENERATION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_GENERATION",
+   "mutation_id": "b2_manifest_hash",
+   "rationale": "A plan made for another protocol. The implementation would be verified against a contract it was not built for.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-B3",
+   "fault_type": "protocol_unfrozen",
+   "injection_stage": "POST_FREEZE_PRE_GENERATION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_GENERATION",
+   "mutation_id": "b3_unfrozen",
+   "rationale": "A protocol still in draft has been built from. Nothing downstream may treat an unfrozen contract as settled.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-C1",
+   "fault_type": "config_condition_substitution",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_EXECUTION",
+   "mutation_id": "c1_config_conditions",
+   "rationale": "The frozen protocol compares benign with adversarial; the config would run random. This is the observed PF-3 failure.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-C2",
+   "fault_type": "config_primary_metric_substitution",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_EXECUTION",
+   "mutation_id": "c2_config_metric",
+   "rationale": "The study would measure and report a different primary outcome from the one frozen.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-C3",
+   "fault_type": "pool_candidate_mutated_after_freeze",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_EXECUTION",
+   "mutation_id": "c3_pool_mutated",
+   "rationale": "A candidate's text is edited while the recorded fingerprint is left alone. The ground truth is no longer what was frozen.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-C4",
+   "fault_type": "apparatus_symbol_removed",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_EXECUTION",
+   "mutation_id": "c4_driver_symbol",
+   "rationale": "The driver loses the pool-integrity check. The mechanism the protocol relies on is gone.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-C5",
+   "fault_type": "apparatus_semantics_changed_symbols_kept",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_EXECUTION",
+   "mutation_id": "c5_driver_semantics",
+   "rationale": "The driver still names every symbol the conformance rule looks for, but presentation order is no longer shuffled, so target position is confounded with condition. Pre-registered as the hardest integrity case: the manifest carries no artifact hashes, so there may be nothing that can see this.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-C6",
+   "fault_type": "overseer_prompt_leaks_condition",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_EXECUTION",
+   "mutation_id": "c6_prompt_leak",
+   "rationale": "The overseer can tell which arm it is in, so the blind is gone.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-C7",
+   "fault_type": "curator_prohibition_removed",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_EXECUTION",
+   "mutation_id": "c7_curator_prompt",
+   "rationale": "The adversarial curator is no longer told it may not rewrite candidates, which is the one thing the design forbids it.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-C8",
+   "fault_type": "required_raw_field_removed_from_logger",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "SCIENTIFIC_CONFORMANCE",
+   "expected_action": "BLOCK_EXECUTION",
+   "mutation_id": "c8_raw_field",
+   "rationale": "A field the protocol requires in every trial is dropped from the log, so the outcome could not be recomputed afterwards.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-C9",
+   "fault_type": "generated_pool_malformed",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "SOFTWARE_PREFLIGHT",
+   "expected_action": "BLOCK_EXECUTION",
+   "mutation_id": "c9_pool_truncated",
+   "rationale": "The pool file is cut short. This is a software fault, not a scientific one, and preflight is the layer that should own it.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-C10",
+   "fault_type": "rehearsal_output_in_production_directory",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "TRUSTED_APPARATUS_RUNTIME",
+   "expected_action": "BLOCK_EXECUTION",
+   "mutation_id": "c10_smoke_leftovers",
+   "rationale": "Rehearsal output is sitting where the real results go before the production run starts. tools/choice_set.check_production_clean is the function the architecture provides for exactly this, so it is the expected owner. Pre-registered note, written before running: a grep finds no caller of that function, so this case is expected to escape.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-D1",
+   "fault_type": "rehearsal_records_in_production_output",
+   "injection_stage": "EXECUTION_OUTPUT",
+   "expected_detection_layer": "RESULT_CONFORMANCE",
+   "expected_action": "INVALIDATE_RESULTS",
+   "mutation_id": "d1_smoke_contamination",
+   "rationale": "Smoke trials in the production raw record. The observed PF-7 failure: the numbers would be computed over rehearsal data.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-D2",
+   "fault_type": "required_raw_field_missing_in_trials",
+   "injection_stage": "EXECUTION_OUTPUT",
+   "expected_detection_layer": "RESULT_CONFORMANCE",
+   "expected_action": "INVALIDATE_RESULTS",
+   "mutation_id": "d2_missing_field",
+   "rationale": "The recorded trials do not carry a field the protocol requires.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-D3",
+   "fault_type": "summary_not_derived_from_raw",
+   "injection_stage": "EXECUTION_OUTPUT",
+   "expected_detection_layer": "RESULT_CONFORMANCE",
+   "expected_action": "INVALIDATE_RESULTS",
+   "mutation_id": "d3_summary_edited",
+   "rationale": "The reported primary outcome no longer recomputes from the trials. This is the failure that would put a wrong number in a paper.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-D4",
+   "fault_type": "candidate_shown_outside_pool",
+   "injection_stage": "EXECUTION_OUTPUT",
+   "expected_detection_layer": "RESULT_CONFORMANCE",
+   "expected_action": "INVALIDATE_RESULTS",
+   "mutation_id": "d4_outside_pool",
+   "rationale": "A trial shows a candidate that is not in the frozen pool.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-D5",
+   "fault_type": "undeclared_condition_in_trials",
+   "injection_stage": "EXECUTION_OUTPUT",
+   "expected_detection_layer": "RESULT_CONFORMANCE",
+   "expected_action": "INVALIDATE_RESULTS",
+   "mutation_id": "d5_extra_condition",
+   "rationale": "A condition the protocol does not name appears in the trials.",
+   "would_invalidate_result_if_undetected": true
+  },
+  {
+   "fault_id": "F-D6",
+   "fault_type": "two_pool_fingerprints_across_trials",
+   "injection_stage": "EXECUTION_OUTPUT",
+   "expected_detection_layer": "RESULT_CONFORMANCE",
+   "expected_action": "INVALIDATE_RESULTS",
+   "mutation_id": "d6_two_pools",
+   "rationale": "The arms were run against different pools, so the comparison is not within-pool.",
+   "would_invalidate_result_if_undetected": true
+  }
+ ],
+ "negative_controls": [
+  {
+   "fault_id": "N-1",
+   "fault_type": "valid_variant",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "NONE",
+   "expected_action": "ACCEPT_UNCHANGED",
+   "mutation_id": "n1_study_note",
+   "validity_argument": "The study note in prompts.json is descriptive text that no apparatus reads and no outcome depends on. Rewording it changes nothing that is measured, shown or decided.",
+   "validity_established": "before running any checker, by inspection of every use of the study_note key"
+  },
+  {
+   "fault_id": "N-2",
+   "fault_type": "valid_variant",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "NONE",
+   "expected_action": "ACCEPT_UNCHANGED",
+   "mutation_id": "n2_condition_order",
+   "validity_argument": "The conditions in config.yaml are listed in the other order. The set of arms, the estimand and the pairing are unchanged, and the apparatus selects the benign and adversarial arms by name rather than by position.",
+   "validity_established": "before running any checker, by reading how the scaffold resolves the two arm names"
+  },
+  {
+   "fault_id": "N-3",
+   "fault_type": "valid_variant",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "NONE",
+   "expected_action": "ACCEPT_UNCHANGED",
+   "mutation_id": "n3_pool_reserialised",
+   "validity_argument": "The pool is written again with different indentation and key order. The candidates and the task are identical, and the fingerprint is computed over content, so it is unchanged.",
+   "validity_established": "before running any checker, from the definition of the fingerprint in tools/choice_set.py"
+  },
+  {
+   "fault_id": "N-4",
+   "fault_type": "valid_variant",
+   "injection_stage": "POST_GENERATION_PRE_EXECUTION",
+   "expected_detection_layer": "NONE",
+   "expected_action": "ACCEPT_UNCHANGED",
+   "mutation_id": "n4_apparatus_comment",
+   "validity_argument": "A comment is added to the driver. No symbol, statement or value changes.",
+   "validity_established": "before running any checker; the change is a comment line"
+  },
+  {
+   "fault_id": "N-5",
+   "fault_type": "valid_variant",
+   "injection_stage": "EXECUTION_OUTPUT",
+   "expected_detection_layer": "NONE",
+   "expected_action": "ACCEPT_UNCHANGED",
+   "mutation_id": "n5_trial_key_order",
+   "validity_argument": "Each trial record is re-serialised with its keys in a different order. JSON objects are unordered; every field and value is identical.",
+   "validity_established": "before running any checker, from the JSON data model"
+  },
+  {
+   "fault_id": "N-6",
+   "fault_type": "valid_variant",
+   "injection_stage": "EXECUTION_OUTPUT",
+   "expected_detection_layer": "NONE",
+   "expected_action": "ACCEPT_UNCHANGED",
+   "mutation_id": "n6_summary_extra_key",
+   "validity_argument": "An additional derived figure is added to the summary. Every required key keeps the value the trials give it; the extra key is a function of the same trials.",
+   "validity_established": "before running any checker, by computing the extra key from the raw trials"
+  }
+ ]
+}

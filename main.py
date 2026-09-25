@@ -130,15 +130,15 @@ def main() -> None:
                 "[dim]Example: python main.py --session <id> --experiment[/]"
             )
             sys.exit(1)
-        if not config.ANTHROPIC_API_KEY:
-            console.print("[bold red]Error:[/] ANTHROPIC_API_KEY is not set.")
-            sys.exit(1)
         from memory.note_db import NoteDB
         from models.api_model import APIModel
         from tools.cost_tracker import CostTracker
         from agents.experiment_agent import ExperimentAgent
         tracker = CostTracker()
-        api = APIModel(cost_tracker=tracker)
+        from tools import app_settings
+        provider = app_settings.api_provider()
+        api = APIModel(cost_tracker=tracker, enabled=app_settings.use_api(),
+                       provider=provider, model=app_settings.api_model(provider))
         db = NoteDB()
         agent = ExperimentAgent(
             api_model=api,
@@ -160,15 +160,15 @@ def main() -> None:
                 "[dim]Example: python main.py --session <id> --run-experiment[/]"
             )
             sys.exit(1)
-        if not config.ANTHROPIC_API_KEY:
-            console.print("[bold red]Error:[/] ANTHROPIC_API_KEY is not set.")
-            sys.exit(1)
         from memory.note_db import NoteDB
         from models.api_model import APIModel
         from tools.cost_tracker import CostTracker
         from agents.experiment_runner import ExperimentRunnerAgent
         tracker = CostTracker()
-        api = APIModel(cost_tracker=tracker)
+        from tools import app_settings
+        provider = app_settings.api_provider()
+        api = APIModel(cost_tracker=tracker, enabled=app_settings.use_api(),
+                       provider=provider, model=app_settings.api_model(provider))
         db = NoteDB()
         agent = ExperimentRunnerAgent(
             api_model=api,
@@ -183,17 +183,6 @@ def main() -> None:
             console.print(f"\n[red]Experiment run failed:[/] {exc}")
         tracker.print_summary()
         sys.exit(0)
-
-    # Validate API key early
-    if not config.ANTHROPIC_API_KEY:
-        console.print(
-            "[bold red]Error:[/] ANTHROPIC_API_KEY environment variable is not set.\n"
-            "Export it before running:\n"
-            "  [dim]export ANTHROPIC_API_KEY=sk-ant-...[/]  (macOS / Linux)\n"
-            "  [dim]set ANTHROPIC_API_KEY=sk-ant-...[/]      (Windows CMD)\n"
-            "  [dim]$env:ANTHROPIC_API_KEY='sk-ant-...'[/]   (PowerShell)",
-        )
-        sys.exit(1)
 
     # Get topic
     if args.session:

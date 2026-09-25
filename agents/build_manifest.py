@@ -144,6 +144,11 @@ class BuildManifest:
     # that a later layer compares identity rather than wording.
     concepts: dict = field(default_factory=dict)
     manifest_version: int = MANIFEST_VERSION
+    # Explicit execution contract fields used by deterministic analysis
+    # packages as well as open-ended generators.
+    required_result_fields: tuple[str, ...] = ()
+    execution_command: tuple[str, ...] = ()
+    repair_policy: str = "mechanical_only_then_revalidate"
 
     def as_dict(self) -> dict:
         data = asdict(self)
@@ -151,7 +156,8 @@ class BuildManifest:
         data["trusted_modules"] = [list(pair) for pair in self.trusted_modules]
         data["generated_artifacts"] = [a.as_dict() for a in self.generated_artifacts]
         for key in ("deterministic_artifacts", "contract_tests",
-                    "scientific_conformance_rules", "smoke_command"):
+                    "scientific_conformance_rules", "smoke_command",
+                    "required_result_fields", "execution_command"):
             data[key] = list(getattr(self, key))
         data["trusted_artifacts"] = [a.as_dict() for a in self.trusted_artifacts]
         data["concepts"] = dict(self.concepts)
@@ -191,6 +197,9 @@ class BuildManifest:
                 for a in data.get("trusted_artifacts", ())),
             concepts=dict(data.get("concepts", {}) or {}),
             manifest_version=int(data.get("manifest_version", 1)),
+            required_result_fields=tuple(data.get("required_result_fields", ())),
+            execution_command=tuple(data.get("execution_command", ())),
+            repair_policy=data.get("repair_policy", "mechanical_only_then_revalidate"),
         )
 
     @classmethod
@@ -226,6 +235,34 @@ def plan(protocol) -> BuildManifest:
     if protocol.scaffold_id == "controlled_llm":
         from agents import controlled_llm_scaffold as scaffold
         return scaffold.build_manifest(protocol)
+
+    if protocol.scaffold_id == "analysis_plan":
+        from agents.plan_assembly import COPIED
+
+        return BuildManifest(
+            protocol_hash=protocol.protocol_hash,
+            protocol_version=protocol.protocol_version,
+            execution_tier=Tier.DECLARATIVE,
+            scaffold_id="analysis_plan",
+            selection_reason=("trusted deterministic analysis blocks assemble the exact "
+                              "human-approved TEST plan"),
+            trusted_modules=tuple((name, name) for name in COPIED),
+            generated_artifacts=(),
+            deterministic_artifacts=("config.json", "requirements.txt", "manifest.json"),
+            entrypoints={"analysis": "run_analysis.py"},
+            dependency_policy="fixed numpy/pandas/scipy requirements",
+            output_locations={"results": "results/"},
+            contract_tests=("legacy assembly hashes", "approved test contract"),
+            scientific_conformance_rules=(
+                "protocol identity", "dataset identity", "variables and columns",
+                "approved analysis blocks", "estimands and decision rules",
+                "required result fields", "trusted apparatus integrity"),
+            smoke_command=(),
+            concepts=dict(protocol.concepts),
+            required_result_fields=tuple(protocol.required_raw_fields),
+            execution_command=("python", "run_analysis.py"),
+            repair_policy="no generated code; rebuild deterministically from frozen protocol",
+        )
 
     # The training families keep the implementation path they already had. They
     # are planned as OPEN_ENDED, which is what they have always been -- stated
@@ -273,21 +310,23 @@ def seal(manifest: BuildManifest, folder: Path | str,
     folder = Path(folder)
     roles = roles or {}
     sealed: list[TrustedArtifact] = []
-    for _, name in manifest.trusted_modules:
+    bound = [name for _, name in manifest.trusted_modules]
+    if manifest.scaffold_id == "analysis_plan":
+        # In this family the config and legacy execution manifest are produced
+        # by trusted deterministic assembly, so their exact bytes are part of
+        # the implementation identity too.
+        bound.extend(manifest.deterministic_artifacts)
+    for name in dict.fromkeys(bound):
         path = folder / name
         if path.exists():
             sealed.append(TrustedArtifact(
                 path=name, sha256=file_hash(path),
                 role=roles.get(name, "trusted apparatus copied from tools/")))
-    # Deterministic artifacts are deliberately not sealed by content.
-    # config.yaml is the frozen protocol restated, and every scientific thing
-    # in it -- the arms, the outcomes, the randomisation, how many candidates
-    # are withheld -- is compared against the protocol clause by clause, which
-    # is a stronger check than a hash for what it is. A hash would also refuse
-    # a reserialisation that changed nothing, and refusing the same two arms
-    # written in the other order is the false block this cycle set out to fix.
-    # Executable apparatus is the opposite case: nothing enumerates what it is
-    # supposed to do, so its content is the only thing that can be checked.
+    # In model-authored families deterministic config is compared with the
+    # protocol clause by clause rather than sealed by bytes: a harmless
+    # reserialisation is not a scientific mutation.  The analysis-plan family
+    # is different: trusted assembly writes its config and legacy manifest, so
+    # the branch above seals those exact artifacts along with its apparatus.
     return replace(manifest, trusted_artifacts=tuple(sealed),
                    concepts=dict(concepts or manifest.concepts))
 

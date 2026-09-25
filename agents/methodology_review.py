@@ -288,6 +288,37 @@ _CHECKS = (_intent_fidelity, _isolation, _ground_truth, _operationalised,
            _agent_actions)
 
 
+def _dataset_analysis_review(protocol: StudyProtocol) -> list[Finding]:
+    """Checks that apply to an approved observational analysis plan."""
+    found = [Finding("blocking", "completeness", problem)
+             for problem in protocol.problems()]
+    identity = protocol.dataset_identity or {}
+    for field_name in ("source", "sha256", "layout_sha256"):
+        if not identity.get(field_name):
+            found.append(Finding("blocking", "dataset_identity",
+                                 f"the audited dataset has no {field_name}"))
+    tests = (protocol.analysis_plan or {}).get("tests") or []
+    if not tests:
+        found.append(Finding("blocking", "analysis_plan",
+                             "the approved analysis plan contains no tests"))
+    for test in tests:
+        missing = [name for name in ("id", "block", "params", "compares",
+                                     "support_if", "reject_if", "outputs")
+                   if not test.get(name)]
+        if missing:
+            found.append(Finding(
+                "blocking", "analysis_plan",
+                f"test {test.get('id', '?')} is missing {', '.join(missing)}"))
+        if test.get("support_if") == test.get("reject_if"):
+            found.append(Finding("blocking", "falsifiability",
+                                 f"test {test.get('id', '?')} uses the same support and reject rule"))
+    if protocol.causal_claim:
+        found.append(Finding(
+            "blocking", "claim",
+            "the deterministic declared-dataset path does not establish a causal claim"))
+    return found
+
+
 # --- the review ---------------------------------------------------------------------
 
 def review(protocol: StudyProtocol, reviewer=None) -> Review:
@@ -297,10 +328,13 @@ def review(protocol: StudyProtocol, reviewer=None) -> Review:
     The protocol's own validity is checked first: a protocol missing required
     fields is not a design to be reviewed, it is an incomplete one.
     """
-    findings: list[Finding] = [
-        Finding("blocking", "completeness", problem) for problem in protocol.problems()]
-    for check in _CHECKS:
-        findings.extend(check(protocol))
+    if protocol.study_type is StudyType.DATASET_ANALYSIS:
+        findings = _dataset_analysis_review(protocol)
+    else:
+        findings = [Finding("blocking", "completeness", problem)
+                    for problem in protocol.problems()]
+        for check in _CHECKS:
+            findings.extend(check(protocol))
 
     verdict = FAIL if any(f.severity == "blocking" for f in findings) else PASS
     notes = ""

@@ -55,6 +55,7 @@ class StudyType(str, Enum):
     RL_TRAINING = "rl_training"
     RETRIEVAL = "retrieval"
     DOMAIN_ADAPTATION = "domain_adaptation"
+    DATASET_ANALYSIS = "dataset_analysis"      # approved plan over a declared dataset
 
 
 class DatasetPolicy(str, Enum):
@@ -97,6 +98,10 @@ _SCIENTIFIC_FIELDS = (
     # protocols with the same words and different concept ids are not the same
     # study, and the hash has to be able to say so.
     "concepts",
+    # Dataset-analysis studies bind the audited source and the approved test
+    # blocks directly.  These cannot be reconstructed from a single metric or
+    # condition name without silently inventing science.
+    "dataset_identity", "analysis_plan",
 )
 
 # What a family has to have said before its protocol may be frozen.
@@ -108,6 +113,12 @@ REQUIRED_BY_FAMILY: dict[StudyType, tuple[str, ...]] = {
         "randomization", "counterbalancing", "primary_metric", "primary_estimand",
         "support_if", "reject_if", "required_raw_fields", "measurement", "required_outputs",
         "allowed_agent_actions", "forbidden_agent_actions",
+    ),
+    StudyType.DATASET_ANALYSIS: (
+        "research_question", "hypothesis", "unit_of_analysis",
+        "independent_variables", "dependent_variables", "primary_metric",
+        "primary_estimand", "support_if", "reject_if", "required_outputs",
+        "dataset_identity", "analysis_plan",
     ),
 }
 _DEFAULT_REQUIRED = ("research_question", "independent_variables", "dependent_variables",
@@ -155,6 +166,12 @@ class StudyProtocol:
     forbidden_agent_actions: tuple[str, ...] = ()
     resource_constraints: dict = field(default_factory=dict)
 
+    # -- declared-dataset authority -------------------------------------------
+    # Both mappings are copied from already approved/audited artifacts. They
+    # are not filled by a model at construction time.
+    dataset_identity: dict = field(default_factory=dict)
+    analysis_plan: dict = field(default_factory=dict)
+
     # -- scientific identity --------------------------------------------------
     # What each display name in this protocol *is*, as a concept id from
     # `agents/scientific_concepts.py`: {"target_selection_rate": "target_selection"}.
@@ -196,7 +213,7 @@ class StudyProtocol:
     def problems(self) -> list[str]:
         """Everything wrong with this as a description of an experiment."""
         found: list[str] = []
-        if len(self.conditions) < 2:
+        if self.study_type is StudyType.CONTROLLED_LLM and len(self.conditions) < 2:
             found.append("an experiment compares at least two conditions; "
                          f"this one names {len(self.conditions)}")
         if len(set(self.conditions)) != len(self.conditions):

@@ -130,7 +130,15 @@ def test_full_study_runs_through_the_gates_and_writes_a_checked_report(env):
     assert hyps["H1"]["testable"] and not hyps["H2"]["testable"]
     assert arts["hypotheses"]["content"]["selected"] == ["H1"] and arts["hypotheses"]["approved"]
     assert arts["plan"]["approved"] and arts["plan"]["content"]["tests"][0]["problems"] == []
+    assert arts["intent_fidelity"]["content"]["status"] == "PASS"
+    assert arts["methodology_review"]["content"]["verdict"] == "PASS"
+    assert arts["study_protocol"]["content"]["status"] == "frozen"
+    assert arts["build_manifest"]["content"]["scaffold_id"] == "analysis_plan"
+    assert arts["scientific_conformance"]["content"]["verdict"] == "PASS"
+    assert arts["software_preflight"]["content"]["passed"] is True
+    assert arts["verified_ready"]["status"] == "passed"
     assert arts["run"]["status"] == "passed"
+    assert arts["result_conformance"]["content"]["verdict"] == "PASS"
 
     rows = {r["id"]: r for r in arts["results"]["content"]["rows"]}
     assert rows["R1"]["verdict"] == "supported"
@@ -147,6 +155,9 @@ def test_full_study_runs_through_the_gates_and_writes_a_checked_report(env):
     assert json.loads(notebook[-1])["exit_code"] == 0
     kinds = [k for k, _ in runner.events]
     assert kinds.index("hypothesis_candidates") < kinds.index("analysis_plan") < kinds.index("results_table")
+    verified_gate = next(i for i, (kind, data) in enumerate(runner.events)
+                         if kind == "control_gate" and data["stage"] == "Software Preflight")
+    assert verified_gate < kinds.index("analysis_run")
 
 
 def test_resume_reuses_approved_stages_and_the_analysis_run(env):

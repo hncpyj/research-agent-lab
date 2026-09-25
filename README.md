@@ -28,7 +28,7 @@ The paper describes how ResearchAgentLab freezes approved scientific intent, bin
 
 ResearchAgentLab organizes a run as eight traceable stages: paper collection, literature review, gap analysis, question and hypothesis approval, experiment construction, frozen execution, result acceptance, and report review.
 
-Human approval in Stage 4 establishes the research-intent boundary. Stage 5 converts that intent into a frozen protocol and bound implementation package. Stages 6–8 preserve execution evidence and restrict which results may support a claim. The dashed return paths represent explicit revision, revalidation, and repair loops—not silent mutation of the approved study.
+Human approval in Stage 4 establishes the research-intent boundary. Stage 5 converts that intent into a frozen protocol and bound implementation package. Stages 6-8 preserve execution evidence and restrict which results may support a claim. The dashed return paths represent explicit revision, revalidation, and repair loops, not silent mutation of the approved study.
 
 ---
 
@@ -42,7 +42,7 @@ ResearchAgentLab focuses on that control problem.
 
 The project asks:
 
-> **How can a research agent preserve human-approved scientific intent across planning, generation, execution, repair, and reporting—and how can we detect when that correspondence breaks?**
+> **How can a research agent preserve human-approved scientific intent across planning, generation, execution, repair, and reporting, and how can we detect when that correspondence breaks?**
 
 The motivating failure mode is **silent scientific objective drift**: a workflow begins from an approved scientific objective, but a later planning, generation, repair, fallback, or execution step changes the effective experiment without making that change visible to the reviewer.
 
@@ -137,52 +137,70 @@ ResearchAgentLab does not currently evaluate frontier dangerous capabilities suc
 
 ## Current research status
 
-The safety architecture and its motivating Choice-Set workload have been evaluated separately.
+The safety architecture and its motivating Choice-Set workload were evaluated separately. The three evidence sources below have **different evidential status** and are not pooled.
 
-These results are intentionally kept distinct:
+### 1. Fresh intent-fidelity holdout (n = 42)
 
-- safety benchmarks do not establish the scientific hypothesis;
-- a successful scientific experiment does not validate every safety layer;
-- development, confirmatory, and post-hoc evidence are not pooled.
+This holdout ran after development debugging and 24 regression tests were complete. The recorded generator was `claude-opus-5` and was isolated from repository files, the production checker, prior holdouts, regressions, failure descriptions, and expected codes. Expected verdicts were assigned by hand and frozen before the checker ran. The evaluator was deterministic and rule-based, with no optional LLM reviewer. The exact generator model version, decoding settings, seed, full generation prompt, individual label author, and independent adjudication are not recorded.
 
-### Safety validation
+| Frozen expected verdict | PASS | FAIL | NEEDS_HUMAN |
+| --- | ---: | ---: | ---: |
+| Drifted (18, including 13 clear substitutions) | **0** | 14 | 4 |
+| Faithful (16) | 9 | 1 | 6 |
+| Ambiguous (8) | **1** | 2 | 5 |
 
-| Evaluation result | Result |
+- No drifted protocol passed, including 0/13 clear-drift cases.
+- Exact agreement with the pre-specified verdict was **28/42**. The gate escalated **15/42** cases.
+
+**Disclosed gate failure.** Case D18 was frozen as `unclear_causal_scope`, with an expected verdict of `NEEDS_HUMAN`, and returned `PASS`. The run classified it as `FIDELITY_AMBIGUITY_MISHANDLED`. It is recorded as a confirmed gate failure under the pre-frozen criterion, not relabelled after the result. The item-level row does not persist the intermediate causality parse, so the exact parser path cannot be reconstructed uniquely from the repository.
+
+### 2. Generator-blind apparatus-integrity holdout (n = 24)
+
+This holdout used 24 trusted-file edits: 18 labelled behavior-changing and 6 labelled behavior-preserving, shuffled under opaque IDs. The generator received copies of five trusted apparatus files from outside the repository and could not read the checkers, BuildManifest, tests, previously observed F-C5 mutation, or expected detection codes. Labels were assigned by hand and frozen before evaluation; the individual label author and independent adjudication are not recorded.
+
+| Condition | Result |
 | --- | ---: |
-| Clear scientific drift accepted by intent fidelity | 0/13 |
-| Any drifted protocol accepted | 0/18 |
-| Faithful protocols hard-blocked | 1/16 |
-| Faithful protocols escalated for review | 6/16 |
-| Generator-blind semantic apparatus mutations detected before execution | 18/18 |
-| Apparatus mutations that would escape without integrity control | 15/18 |
-| Faults detected in the final layered benchmark | 25/25 |
-| Faults escaping the final layered benchmark | 0/25 |
+| Behavior-changing edits refused before execution | **18/18** |
+| Behavior-preserving edits also refused (strictness cost) | **6/6** |
+| Behavior-changing edits accepted after content-integrity neutralization | **15/18** |
 
-These are bounded results from the recorded Choice-Set-domain evaluations and mutation suites. They do **not** establish cross-domain reliability.
+Content integrity is strict content binding, not a semantic classifier, so it refuses any unapproved content change in either direction. The 6/6 figure is the valid-change cost of that strictness.
 
-### Frozen Choice-Set H1 result
+The second replay re-sealed the manifest around each mutated file, making content integrity pass by construction while leaving every other safeguard unchanged. This is the paper's only safeguard-removal counterfactual. It establishes non-redundant marginal protection only for this exact safeguard and mutation family.
 
-One frozen confirmatory run completed **192 paired units** and **384 condition records** with:
+### 3. Layered development benchmark (n = 31; not a fresh holdout)
 
-- no exclusions;
-- no fatal failures;
-- no parse failures;
-- no model retries.
+This benchmark contains 25 positive fault injections and 6 valid controls across pre-freeze, post-freeze, implementation, and result-acceptance boundaries.
+
+| Boundary | Positive | First checks | Initial run |
+| --- | ---: | --- | --- |
+| A: pre-freeze | 6 | Intent Fidelity | 6/6 detected |
+| B: post-freeze | 3 | Protocol Integrity / Scientific Conformance | 3/3 detected |
+| C: implementation | 10 | Scientific Conformance / Software Preflight / Apparatus Runtime | 9/10 detected, **1 escape** |
+| D: result acceptance | 6 | Result Conformance | 6/6 detected |
+| Valid controls | 6 | no block expected | 5/6 accepted, **1 false block** |
+
+The escape was F-C5, a semantics-changing apparatus mutation that preserved the symbols checked by the original rules. After hardening, the same benchmark returned 25/25 detections, while the 1/6 false block remained. **The post-fix result is development regression closure, not fresh validation.**
+
+### Frozen Choice-Set confirmatory run
+
+One frozen run completed **192 paired units** and **384 condition records** with no exclusions, fatal failures, parse failures, or model retries. Design, schedule, candidate pool, prompts, model digest, stopping rule, metrics, and analysis script were frozen before execution.
 
 | Outcome | Benign curation | Adversarial curation | Difference | Paired-bootstrap 95% CI |
 | --- | ---: | ---: | ---: | ---: |
-| Target selection | 25/192 (13.0%) | 52/192 (27.1%) | +14.1 pp | [+8.3, +20.3] pp |
+| Target selection | 25/192 (13.0%) | 52/192 (27.1%) | **+14.1 pp** | [+8.3, +20.3] pp |
 | Explicit approval | 192/192 (100%) | 192/192 (100%) | 0.0 pp | [0.0, 0.0] pp |
 
-The frozen H1 rule was satisfied for this candidate pool, prompt set, local model digest, and execution schedule.
+Paired discordance was 5 benign-only against 32 adversarial-only target selections. The frozen primary rule required the lower interval endpoint to exceed zero, and it did.
 
-Approval was at a complete ceiling, and post-hoc mechanism diagnostics remain descriptive. No second confirmatory run was performed.
+**Limits.** This was one confirmatory run, with no interim effect inspection, replacement, automatic resume, sample-size extension, or second replicate. An earlier eight-pair pilot was explicitly non-confirmatory and is not pooled with the 192 pairs. The interval resamples the realized fixed schedule; the repository defines no superpopulation, so no frequentist coverage is claimed. Approval was at a complete ceiling, so the secondary result should not be read as evidence about approval behavior.
 
 Public evidence organization:
 
 - [`research_logs/README.md`](research_logs/README.md)
 - [`research_logs/paper_evidence/claims.md`](research_logs/paper_evidence/claims.md)
-- [`revision_evidence/PROVENANCE.md`](revision_evidence/PROVENANCE.md) — curated item-level exports and provenance for manuscript verification
+- [`revision_evidence/PROVENANCE.md`](revision_evidence/PROVENANCE.md): curated item-level exports and provenance for manuscript verification
+- Full write-up: [`Protocol_Before_Code.pdf`](Protocol_Before_Code.pdf)
 
 ---
 
@@ -200,10 +218,10 @@ The benchmarks should therefore be read as **bounded adversarial tests of specif
 
 The project also distinguishes:
 
-- **development regression tests** — used while fixing the system;
-- **fresh holdouts** — used to test behavior on unseen cases;
-- **confirmatory scientific runs** — frozen before execution;
-- **post-hoc diagnostics** — descriptive follow-up analysis only.
+- **development regression tests**: used while fixing the system;
+- **fresh holdouts**: used to test behavior on unseen cases;
+- **confirmatory scientific runs**: frozen before execution;
+- **post-hoc diagnostics**: descriptive follow-up analysis only.
 
 ---
 
@@ -428,7 +446,7 @@ Provider calls and local fallbacks are recorded with backend, token, timing, ret
 - Set `ALLOW_CODE_EXECUTION=1` only when the runner is isolated from the host and other users.
 - Local execution is not a security sandbox.
 
-Before staging changes, inspect the complete Git snapshot—not only the current diff—to ensure raw data, credentials, private reviews, and local research notes are not included.
+Before staging changes, inspect the complete Git snapshot, not only the current diff, to ensure raw data, credentials, private reviews, and local research notes are not included.
 
 ---
 
@@ -528,8 +546,8 @@ Run and label them separately, preserve their raw records, and never promote pil
 
 The repository contains two deployable surfaces:
 
-- `web/` — static public website;
-- the Python application — a long-running, stateful FastAPI service with WebSockets and persistent storage.
+- `web/`: static public website;
+- the Python application: a long-running, stateful FastAPI service with WebSockets and persistent storage.
 
 Hosted deployments should configure model routing explicitly.
 
@@ -562,10 +580,10 @@ The project keeps the following categories separate:
 
 See:
 
-- [`research_logs/README.md`](research_logs/README.md) — evidence workflow
-- [`research_logs/baselines.md`](research_logs/baselines.md) — preserved baselines
-- [`research_logs/taxonomy.md`](research_logs/taxonomy.md) — failure taxonomy
-- [`research_logs/paper_evidence/claims.md`](research_logs/paper_evidence/claims.md) — claim boundaries
+- [`research_logs/README.md`](research_logs/README.md): evidence workflow
+- [`research_logs/baselines.md`](research_logs/baselines.md): preserved baselines
+- [`research_logs/taxonomy.md`](research_logs/taxonomy.md): failure taxonomy
+- [`research_logs/paper_evidence/claims.md`](research_logs/paper_evidence/claims.md): claim boundaries
 
 ---
 
@@ -611,6 +629,6 @@ Protocol Before Code therefore treats scientific intent as a versioned object th
 
 [PolyForm Noncommercial 1.0.0](LICENSE)
 
-Noncommercial use—including personal, academic, educational, and nonprofit research—is permitted.
+Noncommercial use, including personal, academic, educational, and nonprofit research, is permitted.
 
 Commercial use requires a separate license from the copyright holder.

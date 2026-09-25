@@ -115,9 +115,11 @@ def test_a_request_for_another_hostname_is_refused(tmp_path):
         "print(c.get('/health', headers={'host': 'somewhere-else.example'}).status_code,\n"
         "      c.get('/health', headers={'host': 'app.researchagentlab.com'}).status_code)\n"
     )
+    python_path = os.pathsep.join(
+        part for part in (str(config.BASE_DIR), os.environ.get("PYTHONPATH", "")) if part)
     env = {**os.environ, "ALLOWED_HOSTS": "app.researchagentlab.com",
            "DATA_DIR": str(tmp_path / "data"), "EXPERIMENTS_DIR": str(tmp_path / "experiments"),
-           "UI_TOKEN": "", "PYTHONPATH": str(config.BASE_DIR), "PYTHONIOENCODING": "utf-8"}
+           "UI_TOKEN": "", "PYTHONPATH": python_path, "PYTHONIOENCODING": "utf-8"}
     done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
                           cwd=str(config.BASE_DIR), env=env, timeout=120)
     assert done.returncode == 0, done.stderr[-800:]

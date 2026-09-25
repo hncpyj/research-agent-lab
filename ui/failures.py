@@ -41,6 +41,24 @@ def describe(exc: BaseException) -> Failure:
     name = type(exc).__name__
     detail = f"{name}: {exc}"
 
+    if name == "ControlBoundaryBlocked":
+        stage = getattr(exc, "stage", "Study control")
+        kinds = {
+            "Intent Fidelity": "intent_fidelity",
+            "Methodology Review": "methodology_review",
+            "Scientific Conformance": "scientific_conformance",
+            "Software Preflight": "preflight",
+            "VERIFIED_READY": "verification_required",
+            "Result Conformance": "result_conformance",
+        }
+        return Failure(
+            kind=kinds.get(stage, "study_control"),
+            title=f"{stage} blocked the run",
+            message=f"The required {stage} boundary did not pass. {_STOPPED_EARLY}",
+            detail=detail,
+            can_retry=stage not in ("Intent Fidelity", "Methodology Review"),
+        )
+
     if name == "ModelAPIDisabled":
         return Failure(
             kind="model_api_off", title="Model API is off",

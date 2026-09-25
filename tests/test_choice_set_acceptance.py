@@ -110,22 +110,49 @@ def test_an_experiment_with_one_condition_is_refused_before_any_code_is_written(
         spec.validate()
 
 
-def test_the_old_file_by_file_path_refuses_to_build_this_family(tmp_path, monkeypatch):
+def test_experiment_agent_routes_this_family_to_the_protocol_first_builder(tmp_path, monkeypatch):
     """
-    Generating this family one file at a time is what went wrong. The old path
-    must refuse it rather than quietly producing whatever it can.
+    Generating this family one file at a time is what went wrong. The production
+    caller must now route it through the protocol-first builder instead of
+    merely surfacing the old guard as an end-user failure.
     """
-    from agents.experiment_agent import UnsupportedExperimentError
-
     monkeypatch.setattr(config, "EXPERIMENTS_DIR", tmp_path)
     note_db = MagicMock()
-    note_db.get_session.return_value = {"background": "", "goals": "", "constraints": ""}
+    note_db.get_session.return_value = {
+        "background": "", "goals": "", "constraints": "",
+        "research_question": QUESTION,
+    }
     note_db.get_degradations.return_value = []
-    agent = ExperimentAgent(api_model=MagicMock(), note_db=note_db,
+    model = MagicMock()
+    agent = ExperimentAgent(api_model=model, note_db=note_db,
                             experiments_base_dir=tmp_path)
 
-    with pytest.raises(UnsupportedExperimentError, match="protocol-first"):
-        agent._generate_all_files({"content": QUESTION}, skip_paths=set(), session_id="s1")
+    from agents import control_boundary, study_builder
+    from agents.build_manifest import Status
+
+    folder = tmp_path / "s1"
+    folder.mkdir()
+    (folder / "run_experiment.py").write_text("# trusted builder output\n", encoding="utf-8")
+    outcome = MagicMock(
+        ready=True, status=Status.VERIFIED_READY, protocol=MagicMock(),
+        manifest=MagicMock(), fidelity=MagicMock(passed=True),
+        review=MagicMock(approved=True),
+    )
+    built = MagicMock(return_value=outcome)
+    authorized = MagicMock()
+    monkeypatch.setattr(study_builder, "build", built)
+    monkeypatch.setattr(control_boundary, "authorize_built_study", authorized)
+
+    files = agent._generate_all_files(
+        {"content": APPROVED_HYPOTHESIS}, skip_paths=set(), session_id="s1")
+
+    built.assert_called_once()
+    authorized.assert_called_once()
+    assert agent._protocol_first_built is True
+    assert agent._last_domain == "controlled_llm"
+    assert "run_experiment.py" in files
+    assert "train.py" not in files
+    model.generate.assert_not_called()  # the generic file-by-file route was not used
 
 
 def test_the_builder_writes_the_trusted_parts_and_generates_only_content(tmp_path):
@@ -240,6 +267,12 @@ def experiment(tmp_path, monkeypatch):
                                  curator="mock-curator", overseer="mock-overseer",
                                  backend="mock")
     _freeze_pool(folder)
+    from agents.build_manifest import BuildManifest
+    from agents.control_boundary import authorize_built_study
+
+    authorize_built_study(
+        folder, protocol, BuildManifest.read(folder),
+        preflight_stages=preflight.BEFORE_INSTALL)
     return folder
 
 
@@ -414,6 +447,7 @@ def test_the_runner_runs_the_trials_instead_of_looking_for_train_py(experiment, 
     monkeypatch.setattr(agent, "_run_phase_script",
                         lambda **kwargs: ran.append(kwargs["script"]))
     monkeypatch.setattr(agent, "_resolve_experiment", lambda sid: ("h1", experiment, 1))
+    monkeypatch.setattr(agent, "_require_result_conformance", lambda *_a, **_k: None)
 
     agent.run(session_id="s1")
 

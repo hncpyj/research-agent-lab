@@ -29,7 +29,6 @@ from models.api_model import APIModel
 from memory.vector_db import VectorDB
 from memory.note_db import NoteDB
 from tools.cost_tracker import CostTracker
-from router import Router
 from agents.paper_collection import PaperCollectionAgent
 from agents.literature_review import LiteratureReviewAgent
 from agents.gap_analysis import GapAnalysisAgent
@@ -58,7 +57,6 @@ class Orchestrator:
         self._vector_db:   Optional[VectorDB]       = None
         self._note_db:     Optional[NoteDB]         = None
         self._cost_tracker: Optional[CostTracker]   = None
-        self._router:      Optional[Router]          = None
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -223,7 +221,15 @@ class Orchestrator:
 
         # API model (always needed — local fallback injected below)
         # session_id is attached in run(), once the session exists
-        self._api_model = APIModel(cost_tracker=self._cost_tracker)
+        from tools import app_settings
+
+        provider = app_settings.api_provider()
+        self._api_model = APIModel(
+            cost_tracker=self._cost_tracker,
+            enabled=app_settings.use_api(),
+            provider=provider,
+            model=app_settings.api_model(provider),
+        )
 
         # Local models (optional) — try Ollama first, then llama-cpp GGUF
         if self._use_local:
@@ -263,13 +269,6 @@ class Orchestrator:
                 "[dim]Local model registered as API offline fallback.[/]"
             )
 
-        # Router
-        self._router = Router(
-            local_model=self._local_model,
-            api_model=self._api_model,
-            force_api=(self._local_model is None),
-        )
-
         console.print("[green]Infrastructure ready.[/]\n")
 
     # ------------------------------------------------------------------
@@ -281,8 +280,7 @@ class Orchestrator:
             console.print(
                 "[yellow]No embedding model: paper ranking by similarity disabled.[/]"
             )
-            # Use a dummy embed model that returns zero vectors
-            embed = _DummyEmbedModel()
+            embed = _UnavailableEmbedModel()
         else:
             embed = self._embed_model
 
@@ -292,14 +290,17 @@ class Orchestrator:
             vector_db=self._vector_db,
             note_db=self._note_db,
             top_k=min(self._max_papers, config.ARXIV_TOP_K),
+            keyword_model=self._api_model if self._api_model.is_loaded else None,
+            allow_lexical_ranking=True,
         )
         papers = agent.run(topic=topic, session_id=session_id)
         self._note_db.update_session(session_id, status="papers_collected")
         return papers
 
     def _run_literature_review(self, papers, session_id: str):
+        self._api_model.ensure_available("Literature Review")
         agent = LiteratureReviewAgent(
-            local_model=self._local_model,
+            local_model=self._api_model,
             note_db=self._note_db,
         )
         enriched = agent.run(papers=papers, session_id=session_id)
@@ -307,6 +308,7 @@ class Orchestrator:
         return enriched
 
     def _run_gap_analysis(self, topic, lit_summary, papers, session_id):
+        self._api_model.ensure_available("Gap Analysis")
         agent = GapAnalysisAgent(
             api_model=self._api_model,
             note_db=self._note_db,
@@ -319,7 +321,8 @@ class Orchestrator:
         )
 
     def _run_hypothesis_generation(self, research_question, papers, session_id):
-        embed = self._embed_model or _DummyEmbedModel()
+        self._api_model.ensure_available("Hypothesis Generation")
+        embed = self._embed_model or _UnavailableEmbedModel()
         agent = HypothesisAgent(
             api_model=self._api_model,
             embed_model=embed,
@@ -414,13 +417,13 @@ class Orchestrator:
 # ---------------------------------------------------------------------------
 # Fallback embedding model (zero vectors) when no local model is available
 # ---------------------------------------------------------------------------
-class _DummyEmbedModel:
-    """Returns 768-dim zero vectors; ChromaDB nearest-neighbour will be random."""
+class _UnavailableEmbedModel:
+    """Explicit absence; callers degrade to lexical/unranked behavior."""
 
-    is_loaded = True
+    is_loaded = False
 
-    def embed(self, text: str) -> list[float]:
-        return [0.0] * 768
+    def embed(self, _text: str):
+        raise RuntimeError("no real embedding backend is configured")
 
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        return [[0.0] * 768 for _ in texts]
+    def embed_batch(self, _texts: list[str]):
+        raise RuntimeError("no real embedding backend is configured")

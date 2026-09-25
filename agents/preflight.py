@@ -191,14 +191,16 @@ def _contract(folder: Path, report: "PreflightReport") -> None:
     spec = StudyProtocol.read(folder)
     if spec is None:
         return
-    try:
-        from agents.experiment_agent import scaffold_by_id
-        scaffold = scaffold_by_id(spec.scaffold_id)
-    except Exception as exc:
-        report.failures.append(Failure(stage=CONTRACT, file="",
-                                       message=f"no scaffold to check against: {exc}"))
-        return
-    checker = getattr(scaffold, "contract", None) or _scaffold_checker(spec.scaffold_id)
+    checker = _scaffold_checker(spec.scaffold_id)
+    if checker is None:
+        try:
+            from agents.experiment_agent import scaffold_by_id
+            scaffold = scaffold_by_id(spec.scaffold_id)
+        except Exception as exc:
+            report.failures.append(Failure(stage=CONTRACT, file="",
+                                           message=f"no scaffold to check against: {exc}"))
+            return
+        checker = getattr(scaffold, "contract", None)
     if checker is None:
         return
 
@@ -212,7 +214,29 @@ def _scaffold_checker(scaffold_id: str):
     if scaffold_id == "controlled_llm":
         from agents.controlled_llm_scaffold import contract_problems
         return contract_problems
+    if scaffold_id == "analysis_plan":
+        return _analysis_plan_contract
     return None
+
+
+def _analysis_plan_contract(folder: Path, protocol) -> list[str]:
+    """Mechanical package contract; scientific equality is checked elsewhere."""
+    import json
+    from agents.plan_assembly import verify
+
+    _, problems = verify(folder)
+    config_path = folder / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return problems + [f"config.json cannot be read: {exc}"]
+    for test in config.get("tests") or ():
+        if not all(key in test for key in ("id", "block", "params")):
+            problems.append("config.json contains an incomplete analysis test")
+            break
+    if not config.get("tests"):
+        problems.append("config.json contains no analysis tests")
+    return problems
 
 
 def _dependencies_and_imports(folder: Path, report: "PreflightReport", files: list[Path],

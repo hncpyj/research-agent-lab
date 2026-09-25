@@ -28,14 +28,21 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def assemble(session_id: str, audit: dict, tests: list[dict], plan_version: int) -> dict:
+def assemble(session_id: str, audit: dict, tests: list[dict], plan_version: int,
+             protocol=None, build_manifest=None, folder: Path | None = None) -> dict:
     """Write the folder; returns the manifest."""
-    folder = config.session_experiment_dir(session_id)
+    folder = Path(folder) if folder is not None else config.session_experiment_dir(session_id)
     folder.mkdir(parents=True, exist_ok=True)
     for name in COPIED:
         shutil.copyfile(TOOLS / name, folder / name)
     cfg = {"layout": audit["layout"], "plan_version": plan_version,
            "tests": [{"id": t["id"], "block": t["block"], "params": t["typed_params"]} for t in tests]}
+    if protocol is not None:
+        cfg.update({
+            "protocol_hash": protocol.protocol_hash,
+            "dataset_identity": protocol.dataset_identity,
+            "analysis_plan": protocol.analysis_plan,
+        })
     (folder / "config.json").write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
     (folder / "requirements.txt").write_text(REQUIREMENTS, encoding="utf-8")
 
@@ -49,6 +56,18 @@ def assemble(session_id: str, audit: dict, tests: list[dict], plan_version: int)
         "code_hash": hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest(),
     }
     (folder / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    if build_manifest is not None:
+        from agents.build_manifest import seal
+
+        build_manifest = seal(
+            build_manifest, folder,
+            roles={name: "trusted deterministic analysis apparatus" for name in COPIED}
+                  | {"config.json": "frozen analysis configuration",
+                     "requirements.txt": "fixed dependency declaration",
+                     "manifest.json": "assembled package integrity manifest"},
+            concepts=getattr(protocol, "concepts", {}),
+        )
+        build_manifest.write(folder)
     return manifest
 
 

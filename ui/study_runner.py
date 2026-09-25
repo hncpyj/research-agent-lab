@@ -103,9 +103,16 @@ def apply_plan(db, session_id: str, text: str, approve: bool) -> tuple[bool, lis
 # Documents to invalidate when a stage is redone: the stage itself and everything
 # built from it, so a rerun cannot mix old and new.
 DOWNSTREAM = {
-    "hypotheses": ["hypotheses", "plan", "assembly", "run", "results", "claims", "report", "review"],
-    "plan": ["plan", "assembly", "run", "results", "claims", "report", "review"],
-    "analysis": ["run", "results", "claims", "report", "review"],
+    "hypotheses": ["hypotheses", "plan", "study_protocol", "intent_fidelity",
+                   "methodology_review", "build_manifest", "scientific_conformance",
+                   "software_preflight", "verified_ready", "assembly", "run", "results",
+                   "result_conformance", "claims", "report", "review"],
+    "plan": ["plan", "study_protocol", "intent_fidelity", "methodology_review",
+             "build_manifest", "scientific_conformance", "software_preflight",
+             "verified_ready", "assembly", "run", "results", "result_conformance",
+             "claims", "report", "review"],
+    "analysis": ["verified_ready", "run", "results", "result_conformance",
+                 "claims", "report", "review"],
     "report": ["claims", "report", "review"],
     "review": ["review"],
 }
@@ -197,10 +204,12 @@ class StudyPipeline:
             return False
         if self._stop_here("plan"):
             return True
-        run = self._run_analysis(audit_art, plan_art)
+        run = self._run_analysis(audit_art, hyp_art, plan_art)
         if run is None:
             return False
         table_art = self._results(plan_art, hyp_art, run)
+        if table_art is None:
+            return False
         if self._stop_here("analysis"):
             return True
         claims_art, report_art = self._report(session, audit_art, hyp_art, plan_art, table_art, papers)
@@ -365,11 +374,35 @@ class StudyPipeline:
                 self.r.emit("log", {"message": "The plan cannot be approved while tests have problems."})
 
     # --- S5 + S6 ---------------------------------------------------------------
-    def _run_analysis(self, audit_art, plan_art) -> dict | None:
+    def _run_analysis(self, audit_art, hyp_art, plan_art) -> dict | None:
         from agents.experiment_runner import ExperimentRunnerAgent
-        from agents.plan_assembly import assemble
+        from agents.control_boundary import prepare_declared_dataset
         self._stage(6, "Analysis")
-        manifest = assemble(self.sid, audit_art["content"], plan_art["content"]["tests"], plan_art["version"])
+        session = self.db.get_session(self.sid)
+        folder = config.session_experiment_dir(self.sid)
+        outcome = prepare_declared_dataset(
+            self.sid, self.db, folder, session.get("research_question") or "",
+            hyp_art["content"], audit_art["content"], plan_art["content"]["tests"],
+            plan_art["version"], self.path)
+        for stage, artifact in (("Intent Fidelity", "intent_fidelity"),
+                                ("Methodology Review", "methodology_review"),
+                                ("Scientific Conformance", "scientific_conformance"),
+                                ("Software Preflight", "software_preflight")):
+            record = self.db.get_artifact(self.sid, artifact)
+            if record is not None:
+                self.r.emit("control_gate", {"stage": stage, "status": record["status"],
+                                             "content": record["content"]})
+        if not outcome.ready:
+            stage = {
+                "intent_fidelity_failed": "Intent Fidelity",
+                "design_needs_human": "Intent Fidelity / Methodology Review",
+                "design_rejected": "Methodology Review",
+                "scientific_verification_failed": "Scientific Conformance",
+                "software_verification_failed": "Software Preflight",
+            }.get(outcome.status.value, "Study control")
+            return self._fail(stage, outcome.notes[0] if outcome.notes else outcome.status.value) or None
+
+        manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
         self.db.save_artifact(self.sid, "assembly", manifest | {"plan_version": plan_art["version"]}, "passed")
         self.db.update_session(self.sid, status="code_generated")
         self.r.emit("analysis_files", {"folder": str(config.session_experiment_dir(self.sid)),
@@ -377,23 +410,34 @@ class StudyPipeline:
 
         runner = ExperimentRunnerAgent(api_model=self.api, note_db=self.db,
                                        experiments_base_dir=config.EXPERIMENTS_DIR)
-        hyp_art = self.db.get_artifact(self.sid, "hypotheses")
         first_id = next(iter(hyp_art["content"]["db_ids"].values()))
         result = runner.run_manifest(self.sid, config.session_experiment_dir(self.sid), first_id)
         content = result | {"plan_version": plan_art["version"]}
         self.db.save_artifact(self.sid, "run", content, result["status"])
         self.r.emit("analysis_run", content)
         if result["status"] != "passed":
-            return self._fail("Analysis", "; ".join(result["problems"]) or "the analysis did not finish") or None
+            return self._fail(result.get("failure_stage", "Analysis"),
+                              "; ".join(result["problems"]) or
+                              "the analysis did not finish") or None
         self.db.update_session(self.sid, status="experiment_run")
         return self.db.get_artifact(self.sid, "run")
 
     # --- S7 --------------------------------------------------------------------
-    def _results(self, plan_art, hyp_art, run_art) -> dict:
+    def _results(self, plan_art, hyp_art, run_art) -> dict | None:
+        from agents import scientific_conformance
         from agents import results_table
         self._stage(7, "Results")
+        folder = config.session_experiment_dir(self.sid)
+        result_check = scientific_conformance.verify_results(folder)
+        self.db.save_artifact(self.sid, "result_conformance", result_check.as_dict(),
+                              "passed" if result_check.passed else "blocked")
+        self.r.emit("control_gate", {"stage": "Result Conformance",
+                                     "status": "passed" if result_check.passed else "blocked",
+                                     "content": result_check.as_dict()})
+        if not result_check.passed:
+            return self._fail("Result Conformance", result_check.summary()) or None
         table = results_table.build(plan_art["content"], hyp_art["content"],
-                                    config.session_experiment_dir(self.sid), self.db.get_degradations(self.sid))
+                                    folder, self.db.get_degradations(self.sid))
         table["run_code_hash"] = run_art["content"]["code_hash"]
         art = self._current("results")
         if art is None or _digest(art["content"]) != _digest(table):

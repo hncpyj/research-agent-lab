@@ -24,6 +24,8 @@ import json
 import logging
 import subprocess
 import sys
+import sysconfig
+import importlib.util
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,6 +42,23 @@ _DISTRIBUTION = {
     "yaml": "pyyaml", "fitz": "pymupdf", "dotenv": "python-dotenv",
     "datasets": "datasets", "gym": "gym", "gymnasium": "gymnasium",
 }
+
+
+def _is_stdlib(name: str) -> bool:
+    """Python 3.9-compatible equivalent of sys.stdlib_module_names."""
+    known = getattr(sys, "stdlib_module_names", None)
+    if known is not None:
+        return name in known
+    if name in sys.builtin_module_names:
+        return True
+    try:
+        spec = importlib.util.find_spec(name)
+        origin = Path(spec.origin).resolve() if spec and spec.origin else None
+        root = Path(sysconfig.get_paths()["stdlib"]).resolve()
+        return bool(origin and root in origin.parents and
+                    "site-packages" not in {part.lower() for part in origin.parts})
+    except (ImportError, OSError, ValueError):
+        return False
 
 
 @dataclass
@@ -81,7 +100,7 @@ def imported_packages(folder: Path) -> list[str]:
             elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
                 names = [node.module.split(".")[0]]
             for name in names:
-                if name and name not in local and name not in sys.stdlib_module_names:
+                if name and name not in local and not _is_stdlib(name):
                     found.add(name)
     return sorted(found)
 

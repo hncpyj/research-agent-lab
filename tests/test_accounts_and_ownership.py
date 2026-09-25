@@ -15,6 +15,8 @@ import config
 from memory import account_email, accounts
 from memory.note_db import NoteDB
 
+_REAL_SEND_PASSWORD_RESET = account_email.send_password_reset
+
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
@@ -384,6 +386,9 @@ def test_resend_https_transport_posts_expected_shape(client, monkeypatch):
         requests.append((request, timeout))
         return _Response()
 
+    # The client fixture stubs account delivery so endpoint tests cannot send
+    # mail. This test is specifically about the real transport implementation.
+    monkeypatch.setattr(account_email, "send_password_reset", _REAL_SEND_PASSWORD_RESET)
     monkeypatch.setattr(account_email.urllib.request, "urlopen", _urlopen)
     account_email.send_password_reset("owner@example.com", "token-value")
 

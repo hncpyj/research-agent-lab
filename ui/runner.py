@@ -983,6 +983,7 @@ class SessionRunner:
             files = {r["file_path"]: r["file_content"] for r in existing}
             hypothesis_dir = config.session_experiment_dir(self.session_id)
             agent._write_files(hypothesis_dir, files)
+            self._authorize_existing_package(note_db, hypothesis_dir)
             self._run_pre_execution_check(note_db, api_model)
             return
 
@@ -995,7 +996,9 @@ class SessionRunner:
         )
 
         hypothesis_dir = config.session_experiment_dir(self.session_id)
-        agent._write_files(hypothesis_dir, generated)
+        if not agent._protocol_first_built:
+            agent._write_files(hypothesis_dir, generated)
+            agent.finalize_generated(self.session_id, selected, hypothesis_dir)
         agent._persist_to_db(self.session_id, hypothesis_id, generated)
         note_db.update_hypothesis_status(
             hypothesis_id, "code_generated", domain=agent._last_domain
@@ -1006,6 +1009,19 @@ class SessionRunner:
                        f"(domain: {agent._last_domain}) → {hypothesis_dir}"
         })
         self._run_pre_execution_check(note_db, api_model)
+
+    def _authorize_existing_package(self, note_db, folder: Path) -> None:
+        """A resumed package must regain permission from its current bytes."""
+        from agents.build_manifest import BuildManifest
+        from agents.control_boundary import authorize_built_study
+        from agents.study_protocol import StudyProtocol
+
+        protocol = StudyProtocol.read(folder)
+        manifest = BuildManifest.read(folder)
+        if protocol is None or manifest is None:
+            raise RuntimeError(
+                "VERIFIED_READY: the stored experiment predates the required protocol/manifest gate")
+        authorize_built_study(folder, protocol, manifest, note_db, self.session_id)
 
     def _run_pre_execution_check(self, note_db, api_model) -> None:
         """

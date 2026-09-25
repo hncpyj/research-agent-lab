@@ -240,6 +240,13 @@ class ExperimentRunnerAgent:
                 f"  python main.py --session {session_id} --experiment"
             )
 
+        # The caller cannot grant itself permission by reaching this method.
+        # The receipt is bound to the frozen protocol, manifest, and current
+        # package bytes and is checked again immediately before any code runs.
+        from agents.control_boundary import require_verified_ready
+
+        require_verified_ready(experiment_dir)
+
         console.print(
             f"  Hypothesis: [cyan]{hypothesis_id[:8]}…[/]\n"
             f"  Directory:  [dim]{experiment_dir}[/]"
@@ -282,6 +289,7 @@ class ExperimentRunnerAgent:
         if (experiment_dir / "run_experiment.py").exists() and not (
                 experiment_dir / "train.py").exists():
             self._run_trials(session_id, hypothesis_id, experiment_dir)
+            self._require_result_conformance(session_id, experiment_dir)
             return
 
         # ---- pretrain (conditional) ----
@@ -333,6 +341,7 @@ class ExperimentRunnerAgent:
         if not (experiment_dir / "results" / "eval_results.json").exists():
             raise RuntimeError(f"Evaluation finished but {experiment_dir / 'results' / 'eval_results.json'} "
                                "does not exist; the experiment produced no results.")
+        self._require_result_conformance(session_id, experiment_dir)
         console.print(Rule("Experiment Complete", style="green"))
 
     # ------------------------------------------------------------------
@@ -361,6 +370,9 @@ class ExperimentRunnerAgent:
         import time
         from datetime import datetime, timezone
         from agents.plan_assembly import verify
+        from agents.control_boundary import require_verified_ready
+
+        require_verified_ready(folder)
 
         manifest, problems = verify(folder)
         if manifest is None or problems:
@@ -384,6 +396,14 @@ class ExperimentRunnerAgent:
         if notebook.exists():
             previous = [json.loads(l) for l in notebook.read_text(encoding="utf-8").splitlines() if l.strip()]
         if any(e["code_hash"] == code_hash and e["exit_code"] == 0 for e in previous) and not outputs_complete():
+            # Reuse is an execution optimisation, not an acceptance decision.
+            # Results may have changed since the notebook entry was written, so
+            # the current package must cross Result Conformance again.
+            try:
+                self._require_result_conformance(session_id, folder)
+            except RuntimeError as exc:
+                return {"status": "failed", "problems": [str(exc)],
+                        "code_hash": code_hash, "failure_stage": "Result Conformance"}
             console.print("[cyan]Analysis already ran with this exact code — results reused.[/]")
             return {"status": "passed", "problems": [], "code_hash": code_hash}
         if not any(e["code_hash"] == code_hash for e in previous) and (folder / "results").exists():
@@ -393,6 +413,15 @@ class ExperimentRunnerAgent:
         install = self._ndb.get_latest_run(session_id, "install")
         if install is None or install["status"] == "failed":
             return {"status": "failed", "problems": ["installing requirements failed"], "code_hash": code_hash}
+
+        from agents import preflight
+        software = preflight.check(folder, stages=preflight.AFTER_INSTALL)
+        self._ndb.save_artifact(session_id, "software_preflight_after_install",
+                                software.as_dict(),
+                                "passed" if software.passed else "blocked")
+        if not software.passed:
+            return {"status": "failed", "problems": [software.summary()],
+                    "code_hash": code_hash}
 
         for phase in manifest["phases"]:
             cmd = [self._python, str(folder / phase["script"])]
@@ -416,7 +445,27 @@ class ExperimentRunnerAgent:
                 return {"status": "failed", "problems": problems, "code_hash": code_hash}
 
         problems = outputs_complete()
-        return {"status": "failed" if problems else "passed", "problems": problems, "code_hash": code_hash}
+        if not problems:
+            try:
+                self._require_result_conformance(session_id, folder)
+            except RuntimeError as exc:
+                problems.append(str(exc))
+        result = {"status": "failed" if problems else "passed", "problems": problems,
+                  "code_hash": code_hash}
+        if problems and any("Result Conformance" in problem for problem in problems):
+            result["failure_stage"] = "Result Conformance"
+        return result
+
+    def _require_result_conformance(self, session_id: str, folder: Path) -> None:
+        """Do not let a completed process become an accepted scientific result."""
+        from agents import scientific_conformance
+
+        report = scientific_conformance.verify_results(folder)
+        if self._ndb is not None:
+            self._ndb.save_artifact(session_id, "result_conformance", report.as_dict(),
+                                    "passed" if report.passed else "blocked")
+        if not report.passed:
+            raise RuntimeError("Result Conformance: " + report.summary())
 
     # ------------------------------------------------------------------
     # Phase: resolve experiment directory
@@ -899,6 +948,22 @@ class ExperimentRunnerAgent:
                     context=plan["context"],
                     strategy=plan["strategy"],
                 )
+                # A mechanical patch invalidates the package identity. It may
+                # retry only after the scientific and software gates pass on
+                # the patched package; a scientific mismatch never enters the
+                # generic repair loop.
+                from agents.build_manifest import BuildManifest
+                from agents.control_boundary import authorize_built_study, invalidate
+                from agents.study_protocol import StudyProtocol
+
+                invalidate(experiment_dir, self._ndb, session_id,
+                           "mechanical repair changed an executable artifact")
+                protocol = StudyProtocol.read(experiment_dir)
+                manifest = BuildManifest.read(experiment_dir)
+                if protocol is None or manifest is None:
+                    raise RuntimeError("Mechanical repair removed the protocol or build manifest")
+                authorize_built_study(experiment_dir, protocol, manifest,
+                                      self._ndb, session_id)
             except Exception as exc:
                 logger.error("Auto-fix API call failed: %s", exc)
                 from memory import repair_log

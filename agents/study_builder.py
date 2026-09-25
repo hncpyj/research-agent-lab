@@ -214,4 +214,11 @@ def build(hypothesis: str, api_model, folder: Path | str, *,
             return outcome
 
     outcome.status = Status.VERIFIED_READY
+    # A status held only in this Python object is not an execution authority.
+    # Persist a receipt bound to the frozen protocol, sealed manifest, and the
+    # exact package bytes so every runner entry point can enforce the boundary.
+    if run_preflight:
+        from agents.control_boundary import authorize
+
+        authorize(folder, protocol, manifest, conformance, outcome.preflight)
     return outcome

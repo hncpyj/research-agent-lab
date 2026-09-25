@@ -104,9 +104,102 @@ def verify(folder: Path | str, protocol=None, manifest=None) -> Conformance:
     _check_plan_matches_protocol(protocol, manifest, result)
     if protocol.scaffold_id == "controlled_llm":
         _check_controlled_llm(folder, protocol, result, manifest)
+    elif protocol.scaffold_id == "analysis_plan":
+        _check_analysis_plan(folder, protocol, result, manifest)
+    else:
+        _check_declared_artifacts(folder, manifest, result)
     if result.violations:
         result.verdict = FAIL
     return result
+
+
+def _check_declared_artifacts(folder: Path, manifest, result: Conformance) -> None:
+    """Minimum identity check for non-specialised implementation families."""
+    result.checked.append("all manifest artifacts and entrypoints are present")
+    paths = ([name for _, name in manifest.trusted_modules]
+             + [a.path for a in manifest.generated_artifacts]
+             + list(manifest.deterministic_artifacts)
+             + list(manifest.entrypoints.values()))
+    for name in dict.fromkeys(paths):
+        if name and not (folder / name).exists():
+            result.violations.append(Violation(
+                "implementation_artifact", name, f"the build manifest requires {name}, but it is missing"))
+    if manifest.trusted_artifacts:
+        _check_trusted_artifacts(folder, manifest, result)
+
+
+def _check_analysis_plan(folder: Path, protocol, result: Conformance, manifest) -> None:
+    """Bind deterministic analysis code and config to the frozen authority."""
+    result.checked.append("the deterministic apparatus matches the sealed manifest")
+    _check_trusted_artifacts(folder, manifest, result)
+
+    config_path = folder / "config.json"
+    if not config_path.exists():
+        result.violations.append(Violation("config", "config.json", "config.json is missing"))
+        return
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        result.violations.append(Violation("config", "config.json",
+                                           f"config.json does not parse: {exc.msg}"))
+        return
+
+    result.checked.append("the executable config names the frozen protocol")
+    if config.get("protocol_hash") != protocol.protocol_hash:
+        result.violations.append(Violation(
+            "protocol_hash", "config.json",
+            f"config names protocol {config.get('protocol_hash')!r}, not {protocol.protocol_hash}"))
+
+    result.checked.append("the audited dataset identity is unchanged")
+    if config.get("dataset_identity") != protocol.dataset_identity:
+        result.violations.append(Violation(
+            "dataset_identity", "config.json",
+            "the executable config is bound to a different dataset identity"))
+    else:
+        try:
+            import hashlib
+
+            dataset = Path((config.get("layout") or {}).get("path", ""))
+            digest = hashlib.sha256()
+            with dataset.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            if digest.hexdigest() != protocol.dataset_identity.get("sha256"):
+                result.violations.append(Violation(
+                    "dataset_identity", "config.json",
+                    "the dataset bytes changed after the data audit"))
+        except OSError as exc:
+            result.violations.append(Violation(
+                "dataset_identity", "config.json", f"the audited dataset cannot be read: {exc}"))
+
+    result.checked.append("variables, blocks, estimands, and rules match the approved plan")
+    approved = protocol.analysis_plan or {}
+    if config.get("analysis_plan") != approved:
+        result.violations.append(Violation(
+            "analysis_plan", "config.json",
+            "the executable package does not carry the exact approved analysis plan"))
+    expected_runtime = [
+        {"id": test["id"], "block": test["block"], "params": test["params"]}
+        for test in approved.get("tests", ())
+    ]
+    if config.get("tests") != expected_runtime:
+        result.violations.append(Violation(
+            "analysis_plan", "config.json",
+            "the runtime tests differ from the approved blocks or variable bindings"))
+
+    result.checked.append("the execution manifest requires every approved output")
+    legacy_path = folder / "manifest.json"
+    try:
+        legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        result.violations.append(Violation(
+            "implementation_manifest", "manifest.json", f"manifest.json cannot be read: {exc}"))
+        return
+    expected_outputs = [contract.path for contract in protocol.required_outputs]
+    if legacy.get("expected_outputs") != expected_outputs:
+        result.violations.append(Violation(
+            "outputs", "manifest.json",
+            "the executable package does not require exactly the protocol's result files"))
 
 
 def _check_plan_matches_protocol(protocol, manifest, result: Conformance) -> None:
@@ -317,6 +410,10 @@ def verify_results(folder: Path | str, protocol=None) -> Conformance:
     result = Conformance(PASS)
     if protocol is None:
         return Conformance(FAIL, [Violation("protocol", "", "no protocol to check against")])
+    if protocol.scaffold_id == "analysis_plan":
+        return _verify_analysis_results(folder, protocol)
+    if protocol.scaffold_id != "controlled_llm":
+        return _verify_output_contracts(folder, protocol)
 
     results_dir = folder / "results"
     raw = results_dir / "raw_trials.jsonl"
@@ -399,6 +496,91 @@ def verify_results(folder: Path | str, protocol=None) -> Conformance:
             "summary", "results/summary_metrics.json",
             "the trial counts per condition do not match the raw record"))
 
+    if result.violations:
+        result.verdict = FAIL
+    return result
+
+
+def _verify_output_contracts(folder: Path, protocol) -> Conformance:
+    """Family-neutral result acceptance for declared output contracts."""
+    result = Conformance(PASS)
+    result.checked.append("every protocol output exists and satisfies its schema")
+    for contract in protocol.required_outputs:
+        path = folder / contract.path
+        if not path.exists():
+            result.violations.append(Violation(
+                "outputs", contract.path, f"{contract.path} was not produced"))
+            continue
+        try:
+            if contract.format == "jsonl":
+                records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+                           if line.strip()]
+                record = records[0] if records else {}
+            elif contract.format == "json":
+                record = json.loads(path.read_text(encoding="utf-8"))
+            else:
+                record = {"content": path.read_text(encoding="utf-8")}
+        except (OSError, json.JSONDecodeError) as exc:
+            result.violations.append(Violation(
+                "outputs", contract.path, f"the result cannot be read: {exc}"))
+            continue
+        missing = [key for key in contract.required_keys if key not in record]
+        if missing:
+            result.violations.append(Violation(
+                "result_fields", contract.path, f"the result is missing {', '.join(missing)}"))
+    if result.violations:
+        result.verdict = FAIL
+    return result
+
+
+def _verify_analysis_results(folder: Path, protocol) -> Conformance:
+    """Result contract for deterministic declared-dataset analyses."""
+    result = Conformance(PASS)
+    tests = {test["id"]: test for test in (protocol.analysis_plan or {}).get("tests", ())}
+    expected_paths = {contract.path: contract for contract in protocol.required_outputs}
+    result.checked.append("every approved test produced its required result record")
+    for relative, contract in expected_paths.items():
+        path = folder / relative
+        if not path.exists():
+            result.violations.append(Violation("outputs", relative, f"{relative} was not produced"))
+            continue
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            result.violations.append(Violation("outputs", relative,
+                                               f"the result cannot be read: {exc}"))
+            continue
+        missing = [key for key in contract.required_keys if key not in record]
+        if missing:
+            result.violations.append(Violation(
+                "result_fields", relative, f"the result is missing {', '.join(missing)}"))
+            continue
+        test = tests.get(record.get("test_id"))
+        if test is None:
+            result.violations.append(Violation(
+                "analysis_plan", relative, "the result belongs to no approved test"))
+            continue
+        if record.get("block") != test["block"] or record.get("params") != test["params"]:
+            result.violations.append(Violation(
+                "analysis_plan", relative,
+                "the result reports a different analysis block or variable binding"))
+            continue
+        outputs = record.get("outputs") or {}
+        missing_outputs = [key for key in test["outputs"] if key not in outputs]
+        if missing_outputs:
+            result.violations.append(Violation(
+                "result_fields", relative,
+                f"the approved decision rule needs {', '.join(missing_outputs)}, which is absent"))
+
+    result.checked.append("no unapproved test result is accepted")
+    results_dir = folder / "results"
+    if results_dir.exists():
+        extras = [str(path.relative_to(folder)).replace("\\", "/")
+                  for path in results_dir.glob("*.json")
+                  if str(path.relative_to(folder)).replace("\\", "/") not in expected_paths]
+        if extras:
+            result.violations.append(Violation(
+                "outputs", "results/", "unapproved result files are present: " + ", ".join(extras)))
     if result.violations:
         result.verdict = FAIL
     return result

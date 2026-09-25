@@ -281,6 +281,19 @@ def test_the_run_from_the_log_would_now_fix_the_right_file(experiment, monkeypat
     agent = ExperimentRunnerAgent(api_model=api, note_db=db, experiments_base_dir=tmp_path,
                                   max_fix_attempts=1)
 
+    # This unit test isolates culprit selection. Production repair permission
+    # is covered separately by test_production_control_integration.py.
+    from agents import control_boundary
+    from agents.build_manifest import BuildManifest
+    from agents.experiment_agent import build_spec
+    from agents.study_protocol import StudyProtocol
+    repair_spec = build_spec(
+        "BERT improves text classification accuracy on AG News relative to a baseline.")
+    monkeypatch.setattr(StudyProtocol, "read",
+                        classmethod(lambda cls, folder: repair_spec))
+    monkeypatch.setattr(BuildManifest, "read", classmethod(lambda cls, folder: MagicMock()))
+    monkeypatch.setattr(control_boundary, "authorize_built_study", lambda *_a, **_k: {})
+
     calls = {"n": 0}
 
     def fail_then_pass(cmd, cwd, timeout, phase_label):
@@ -322,6 +335,16 @@ def test_a_patch_that_changes_nothing_is_recorded_as_such(experiment, monkeypatc
 
     agent = ExperimentRunnerAgent(api_model=api, note_db=db, experiments_base_dir=tmp_path,
                                   max_fix_attempts=2)
+    from agents import control_boundary
+    from agents.build_manifest import BuildManifest
+    from agents.experiment_agent import build_spec
+    from agents.study_protocol import StudyProtocol
+    repair_spec = build_spec(
+        "BERT improves text classification accuracy on AG News relative to a baseline.")
+    monkeypatch.setattr(StudyProtocol, "read",
+                        classmethod(lambda cls, folder: repair_spec))
+    monkeypatch.setattr(BuildManifest, "read", classmethod(lambda cls, folder: MagicMock()))
+    monkeypatch.setattr(control_boundary, "authorize_built_study", lambda *_a, **_k: {})
     monkeypatch.setattr(agent, "_stream_subprocess",
                         lambda cmd, cwd, timeout, phase_label: ("", traceback, 1))
 

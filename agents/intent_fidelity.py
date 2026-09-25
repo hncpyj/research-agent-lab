@@ -795,6 +795,67 @@ def _unmatched(slot: str, kind: str, concept_id: str, approved_label: str,
     return Finding(blocking_code, detail, approved_label,
                    ", ".join(str(v) for v in protocol_values))
 
+def _check_dataset_analysis(protocol, approved: ApprovedIntent) -> Fidelity:
+    """Exact authority comparison for a human-approved analysis plan."""
+    findings: list[Finding] = []
+    checked = ["research question", "approved hypotheses", "dataset identity",
+               "analysis plan", "primary outcome", "variables"]
+    structured = approved.structured or {}
+
+    if protocol.research_question.strip() != approved.research_question.strip():
+        findings.append(Finding(
+            CLAIM_SCOPE_EXPANDED,
+            "the protocol's research question is not the question that was approved",
+            approved.research_question, protocol.research_question))
+    if protocol.hypothesis.strip() != approved.hypothesis.strip():
+        findings.append(Finding(
+            CLAIM_SCOPE_EXPANDED,
+            "the protocol's selected hypotheses are not the hypotheses that were approved",
+            approved.hypothesis, protocol.hypothesis))
+    if not structured.get("dataset_identity") or not structured.get("analysis_plan"):
+        findings.append(Finding(
+            INTENT_UNSPECIFIED,
+            "the approval does not carry the audited dataset and approved analysis plan"))
+    else:
+        if protocol.dataset_identity != structured["dataset_identity"]:
+            findings.append(Finding(
+                INTERVENTION_CHANGED,
+                "the protocol is bound to a different dataset than the approved audit",
+                json.dumps(structured["dataset_identity"], sort_keys=True),
+                json.dumps(protocol.dataset_identity, sort_keys=True)))
+        if protocol.analysis_plan != structured["analysis_plan"]:
+            findings.append(Finding(
+                REQUIRED_CONTROL_DROPPED,
+                "the protocol's tests differ from the human-approved analysis plan",
+                json.dumps(structured["analysis_plan"], sort_keys=True),
+                json.dumps(protocol.analysis_plan, sort_keys=True)))
+
+    def displays(value) -> tuple[str, ...]:
+        values = value if isinstance(value, (list, tuple)) else (value,)
+        return tuple(str(v.get("display_name") or v.get("name") or "")
+                     if isinstance(v, dict) else str(v) for v in values if v)
+
+    approved_primary = displays(structured.get("primary_outcome"))
+    if approved_primary and protocol.primary_metric not in approved_primary:
+        findings.append(Finding(
+            PRIMARY_OUTCOME_CHANGED,
+            "the protocol's primary outcome differs from the approved analysis output",
+            ", ".join(approved_primary), protocol.primary_metric))
+    approved_variables = set(displays(structured.get("interventions") or ()))
+    if approved_variables and set(protocol.independent_variables) != approved_variables:
+        findings.append(Finding(
+            INTERVENTION_CHANGED,
+            "the protocol's variable bindings differ from the approved analysis plan",
+            ", ".join(sorted(approved_variables)),
+            ", ".join(sorted(protocol.independent_variables))))
+
+    blocking = [finding for finding in findings if finding.blocking]
+    status = FAIL if blocking else NEEDS_HUMAN if findings else PASS
+    return Fidelity(status=status, findings=findings, checked=checked,
+                    sources={name: STRUCTURED for name in checked},
+                    unspecified=[] if not findings else ["dataset_analysis_authority"])
+
+
 def check(protocol, intent: StructuredIntent | None = None, reviewer=None,
           approved: ApprovedIntent | None = None) -> Fidelity:
     """
@@ -808,6 +869,14 @@ def check(protocol, intent: StructuredIntent | None = None, reviewer=None,
     Returns PASS, FAIL or NEEDS_HUMAN. It never changes the protocol.
     """
     approved = approved or ApprovedIntent.from_protocol(protocol)
+    # A declared-dataset plan is already structured authority: the user
+    # approved exact TEST blocks after their variables were checked against the
+    # audit.  Reducing that record back to prose would discard the very
+    # identities this gate must protect, so this family compares the approved
+    # records directly inside the same authoritative fidelity implementation.
+    from agents.study_protocol import StudyType
+    if protocol.study_type is StudyType.DATASET_ANALYSIS:
+        return _check_dataset_analysis(protocol, approved)
     # The field these terms are read in. The approval may state it; otherwise
     # it follows from the scaffold that implements the study. When neither
     # says, it stays unknown, and only field-independent concepts resolve.

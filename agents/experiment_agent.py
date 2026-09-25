@@ -1244,6 +1244,7 @@ class ExperimentAgent:
         self._exp_base = Path(experiments_base_dir)
         self._last_domain: str | None = None  # set by _generate_all_files
         self._last_spec = None                # the ExperimentSpec this run was built from
+        self._protocol_first_built = False
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -1300,7 +1301,9 @@ class ExperimentAgent:
 
         # Step D: write to file system
         hypothesis_dir = self._exp_base / session_id
-        self._write_files(hypothesis_dir, generated)
+        if not self._protocol_first_built:
+            self._write_files(hypothesis_dir, generated)
+            self.finalize_generated(session_id, selected, hypothesis_dir)
 
         # Step E: persist to NoteDB
         self._persist_to_db(session_id, hypothesis_id, generated)
@@ -1391,7 +1394,12 @@ class ExperimentAgent:
         from agents.experiment_spec import DatasetPolicy, SpecInvalid
 
         try:
-            spec = build_spec(content, hypothesis.get("experiment_design") or {})
+            research_question = ""
+            if session_id:
+                session = self._ndb.get_session(session_id) or {}
+                research_question = session.get("research_question") or ""
+            spec = build_spec(content, hypothesis.get("experiment_design") or {},
+                              research_question)
             spec.validate()
             domain = scaffold_by_id(spec.scaffold_id)
         except UnsupportedExperimentError as exc:
@@ -1408,9 +1416,52 @@ class ExperimentAgent:
             # code writes the apparatus and the config, and a model writes only
             # the content. Generating it file-by-file here is what produced a
             # driver that discarded its own curation.
-            raise UnsupportedExperimentError(
-                "controlled decision studies are built through the protocol-first path "
-                "(agents/study_builder.build), not by generating one file at a time")
+            if not session_id:
+                raise UnsupportedExperimentError(
+                    "controlled decision studies require a session so the protocol-first "
+                    "build and its approvals can be persisted")
+            from agents import study_builder
+            from agents.control_boundary import authorize_built_study
+            from agents.intent_fidelity import ApprovedIntent
+
+            folder = self._exp_base / session_id
+            approved = ApprovedIntent(hypothesis=content,
+                                      research_question=research_question)
+            outcome = study_builder.build(
+                content, self._api, folder, approved=approved, protocol=spec)
+            self._persist_control_outcome(session_id, outcome)
+            if not outcome.ready:
+                from agents.build_manifest import Status
+                from agents.control_boundary import ControlBoundaryBlocked
+
+                stage = {
+                    Status.INTENT_FIDELITY_FAILED: "Intent Fidelity",
+                    Status.DESIGN_REJECTED: "Methodology Review",
+                    Status.SCIENTIFIC_VERIFICATION_FAILED: "Scientific Conformance",
+                    Status.SOFTWARE_VERIFICATION_FAILED: "Software Preflight",
+                }.get(outcome.status)
+                if outcome.status is Status.DESIGN_NEEDS_HUMAN:
+                    stage = ("Intent Fidelity" if outcome.fidelity and
+                             not outcome.fidelity.passed else "Methodology Review")
+                # Builders retain earlier lifecycle notes (for example the
+                # frozen hash); the last note explains the boundary that
+                # actually stopped this attempt.
+                reason = outcome.notes[-1] if outcome.notes else outcome.status.value
+                if stage:
+                    raise ControlBoundaryBlocked(stage, reason)
+                raise UnsupportedExperimentError(
+                    f"controlled study blocked at {outcome.status.value}: {reason}")
+            authorize_built_study(folder, outcome.protocol, outcome.manifest,
+                                  self._ndb, session_id)
+            self._last_spec = outcome.protocol
+            self._last_domain = "controlled_llm"
+            self._protocol_first_built = True
+            files = {}
+            for path in folder.rglob("*"):
+                if path.is_file() and not ({"results", "__pycache__"} & set(path.relative_to(folder).parts)):
+                    relative = str(path.relative_to(folder)).replace("\\", "/")
+                    files[relative] = path.read_text(encoding="utf-8", errors="replace")
+            return files
         dataset_info = ""
         research_question = ""
         system_prompt = domain.system_prompt
@@ -1532,6 +1583,84 @@ class ExperimentAgent:
 
         generated = self._repair_generated(generated, todo, spec, system_prompt, deg)
         return generated
+
+    def finalize_generated(self, session_id: str, selected: dict,
+                           folder: Path | str) -> None:
+        """Take an open-ended generated family through the common build gates."""
+        if self._protocol_first_built:
+            return
+        from agents import (build_manifest as manifest_module, intent_fidelity,
+                            methodology_review, preflight, scientific_conformance)
+        from agents.control_boundary import (ControlBoundaryBlocked, authorize,
+                                             invalidate)
+        from agents.intent_fidelity import ApprovedIntent
+        from agents.study_builder import may_freeze
+
+        folder = Path(folder)
+        invalidate(folder, self._ndb, session_id,
+                   "generated package is being verified")
+        protocol = self._last_spec
+        if protocol is None:
+            raise UnsupportedExperimentError("no StudyProtocol was produced for the generated package")
+        session = self._ndb.get_session(session_id) or {}
+        approved = ApprovedIntent(
+            hypothesis=selected.get("content") or "",
+            research_question=session.get("research_question") or "")
+        protocol = intent_fidelity.propagate_identity(protocol, approved)
+        fidelity = intent_fidelity.check(protocol, approved=approved)
+        review = methodology_review.review(protocol)
+        self._last_spec = protocol
+        class _Outcome:
+            pass
+        recorded = _Outcome()
+        recorded.protocol, recorded.fidelity, recorded.review = protocol, fidelity, review
+        recorded.manifest = None
+        self._persist_control_outcome(session_id, recorded)
+        if not may_freeze(fidelity, review):
+            reason = fidelity.summary() if not fidelity.passed else review.summary()
+            stage = "Intent Fidelity" if not fidelity.passed else "Methodology Review"
+            raise ControlBoundaryBlocked(stage, reason)
+
+        protocol = protocol.approve().freeze()
+        self._last_spec = protocol
+        protocol.write(folder)
+        manifest = manifest_module.plan(protocol)
+        manifest = manifest_module.seal(manifest, folder, concepts=protocol.concepts)
+        manifest.write(folder)
+        self._ndb.save_artifact(session_id, "study_protocol", protocol.as_dict(), "passed")
+        self._ndb.save_artifact(session_id, "build_manifest", manifest.as_dict(), "passed")
+        conformance = scientific_conformance.verify(folder, protocol, manifest)
+        self._ndb.save_artifact(session_id, "scientific_conformance",
+                                conformance.as_dict(),
+                                "passed" if conformance.passed else "blocked")
+        if not conformance.passed:
+            raise ControlBoundaryBlocked("Scientific Conformance", conformance.summary())
+        report = preflight.check(folder, db=self._ndb, session_id=session_id,
+                                 stages=preflight.BEFORE_INSTALL)
+        self._ndb.save_artifact(session_id, "software_preflight", report.as_dict(),
+                                "passed" if report.passed else "blocked")
+        if not report.passed:
+            raise ControlBoundaryBlocked("Software Preflight", report.summary())
+        authorize(folder, protocol, manifest, conformance, report,
+                  self._ndb, session_id)
+
+    def _persist_control_outcome(self, session_id: str, outcome) -> None:
+        """Expose each independent controlled-study gate through existing artifacts."""
+        if outcome.protocol is not None:
+            self._ndb.save_artifact(session_id, "study_protocol",
+                                    outcome.protocol.as_dict(),
+                                    "passed" if outcome.protocol.frozen else "blocked")
+        if outcome.fidelity is not None:
+            self._ndb.save_artifact(session_id, "intent_fidelity",
+                                    outcome.fidelity.as_dict(),
+                                    "passed" if outcome.fidelity.passed else outcome.fidelity.status.lower())
+        if outcome.review is not None:
+            self._ndb.save_artifact(session_id, "methodology_review",
+                                    outcome.review.as_dict(),
+                                    "passed" if outcome.review.approved else outcome.review.verdict.lower())
+        if outcome.manifest is not None:
+            self._ndb.save_artifact(session_id, "build_manifest",
+                                    outcome.manifest.as_dict(), "passed")
 
     def _repair_generated(self, generated: dict, todo: list, spec, system_prompt: str,
                           deg=None) -> dict:

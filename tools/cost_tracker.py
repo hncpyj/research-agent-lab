@@ -58,6 +58,15 @@ class CostTracker:
         task_type: str,
         is_local: bool = False,
         session_id: str = "",
+        provider: str = "",
+        selected_model: str = "",
+        actual_provider: str = "",
+        actual_model: str = "",
+        routing_policy: str = "",
+        fallback_attempts: int = 0,
+        fallback_trail: str = "",
+        retry_count: int = 0,
+        cost_known: bool = True,
     ) -> float:
         """
         Insert one record and return the USD cost for this call.
@@ -77,17 +86,23 @@ class CostTracker:
         usage that just didn't get logged. Every generate() call — API or
         local — must produce exactly one row here.
         """
-        cost = 0.0 if is_local else _get_cost(model, input_tokens, output_tokens)
+        cost = 0.0 if is_local or not cost_known else _get_cost(
+            model, input_tokens, output_tokens)
         ts = datetime.utcnow().isoformat(timespec="seconds")
 
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO api_usage_log
-                    (timestamp, model, input_tokens, output_tokens, cost_usd, task_type, session_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (timestamp, model, input_tokens, output_tokens, cost_usd, task_type,
+                     session_id, provider, selected_model, actual_provider, actual_model,
+                     routing_policy, fallback_attempts, fallback_trail, retry_count, cost_known)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ts, model, input_tokens, output_tokens, cost, task_type, session_id or ""),
+                (ts, model, input_tokens, output_tokens, cost, task_type, session_id or "",
+                 provider, selected_model, actual_provider, actual_model, routing_policy,
+                 max(int(fallback_attempts or 0), 0), (fallback_trail or "")[:2000],
+                 max(int(retry_count or 0), 0), 1 if cost_known else 0),
             )
 
         logger.debug(
@@ -95,6 +110,26 @@ class CostTracker:
             model, task_type, input_tokens, output_tokens, cost,
         )
         return cost
+
+    def log_provider_event(
+        self, *, session_id: str, task_type: str, event_type: str,
+        provider: str, selected_model: str, retry_count: int = 0,
+        error_type: str = "", error_message: str = "",
+    ) -> None:
+        """Persist a non-secret provider failure/retry event separately from usage rows."""
+        message = " ".join((error_message or "").split())[:1000]
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO provider_route_events
+                    (timestamp, session_id, task_type, event_type, provider,
+                     selected_model, retry_count, error_type, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (datetime.utcnow().isoformat(timespec="seconds"), session_id or "",
+                 task_type, event_type, provider, selected_model,
+                 max(int(retry_count or 0), 0), error_type, message),
+            )
 
     def call_count(self, since_timestamp: Optional[str] = None) -> int:
         """
@@ -132,6 +167,23 @@ class CostTracker:
         calls = row[0] or 0
         return {"cost_usd": row[1] or 0.0, "calls": calls, "local_calls": row[2] or 0,
                 "attributed": calls > 0}
+
+    def session_routes(self, session_id: str, limit: int = 50) -> list[dict]:
+        """Recent non-secret routing provenance for one research session."""
+        safe_limit = min(max(int(limit), 1), 200)
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT timestamp, task_type, provider, selected_model,
+                       actual_provider, actual_model, routing_policy,
+                       fallback_attempts, fallback_trail, retry_count,
+                       input_tokens, output_tokens, cost_usd, cost_known
+                FROM api_usage_log
+                WHERE session_id = ?
+                ORDER BY id DESC LIMIT ?
+                """, (session_id, safe_limit)).fetchall()
+        return [dict(row) for row in rows]
 
     def spend_since(self, since_timestamp: str) -> float:
         """USD spent since an ISO timestamp."""
@@ -229,7 +281,16 @@ class CostTracker:
                     output_tokens INTEGER NOT NULL,
                     cost_usd      REAL    NOT NULL,
                     task_type     TEXT    NOT NULL,
-                    session_id    TEXT    NOT NULL DEFAULT ''
+                    session_id    TEXT    NOT NULL DEFAULT '',
+                    provider      TEXT    NOT NULL DEFAULT '',
+                    selected_model TEXT   NOT NULL DEFAULT '',
+                    actual_provider TEXT  NOT NULL DEFAULT '',
+                    actual_model  TEXT    NOT NULL DEFAULT '',
+                    routing_policy TEXT   NOT NULL DEFAULT '',
+                    fallback_attempts INTEGER NOT NULL DEFAULT 0,
+                    fallback_trail TEXT   NOT NULL DEFAULT '',
+                    retry_count   INTEGER NOT NULL DEFAULT 0,
+                    cost_known    INTEGER NOT NULL DEFAULT 1
                 )
                 """
             )
@@ -238,4 +299,34 @@ class CostTracker:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(api_usage_log)")}
             if "session_id" not in columns:
                 conn.execute("ALTER TABLE api_usage_log ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")
+            migrations = {
+                "provider": "TEXT NOT NULL DEFAULT ''",
+                "selected_model": "TEXT NOT NULL DEFAULT ''",
+                "actual_provider": "TEXT NOT NULL DEFAULT ''",
+                "actual_model": "TEXT NOT NULL DEFAULT ''",
+                "routing_policy": "TEXT NOT NULL DEFAULT ''",
+                "fallback_attempts": "INTEGER NOT NULL DEFAULT 0",
+                "fallback_trail": "TEXT NOT NULL DEFAULT ''",
+                "retry_count": "INTEGER NOT NULL DEFAULT 0",
+                "cost_known": "INTEGER NOT NULL DEFAULT 1",
+            }
+            for name, declaration in migrations.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE api_usage_log ADD COLUMN {name} {declaration}")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS provider_route_events (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp      TEXT NOT NULL,
+                    session_id     TEXT NOT NULL DEFAULT '',
+                    task_type      TEXT NOT NULL,
+                    event_type     TEXT NOT NULL,
+                    provider       TEXT NOT NULL,
+                    selected_model TEXT NOT NULL,
+                    retry_count    INTEGER NOT NULL DEFAULT 0,
+                    error_type     TEXT NOT NULL DEFAULT '',
+                    error_message  TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_session ON api_usage_log(session_id)")

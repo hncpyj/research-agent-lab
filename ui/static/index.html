@@ -1966,7 +1966,12 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
       <div class="inline-form">
         <div class="field" style="margin:0">
           <label for="api-key-provider" data-i18n="keys.provider">Provider</label>
-          <select id="api-key-provider"></select>
+          <select id="api-key-provider" onchange="updateApiKeyFields()"></select>
+        </div>
+        <div class="field" id="api-key-url-field" style="margin:0;flex:1" hidden>
+          <label for="api-key-url-input" data-i18n="keys.gatewayUrl">Gateway address</label>
+          <input id="api-key-url-input" type="url" autocomplete="off" spellcheck="false"
+                 placeholder="https://gateway.example.com/v1" style="min-width:260px">
         </div>
         <div class="field" style="margin:0;flex:1">
           <label for="api-key-input" data-i18n="keys.key">API key</label>
@@ -2014,6 +2019,7 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
         <span class="help" id="budget-help">—</span>
       </div>
       <button class="btn-primary btn-sm" onclick="saveModelSettings()" data-i18n="common.save">Save</button>
+      <div id="model-route-history" style="margin-top:14px"></div>
     </div>
 
     <div class="panel">
@@ -2337,12 +2343,18 @@ en: {
   'models.off': 'off — model-dependent phases pause before external inference',
   'models.sharedFree': 'on — shared free {provider} / {model}',
   'models.byok': 'on — your {provider} key / {model}',
+  'models.simpleByok': 'on — automatic routing across your keys / {model}',
   'models.configured': 'on — {provider} / {model}',
   'models.noModel': '(no model chosen)',
   'models.provider': 'Provider',
   'models.noKey': ' — no key',
   'models.keySet': '{env} is set · <a href="{docs}" target="_blank" rel="noreferrer">pricing</a>',
   'models.keyMissing': 'No server key is configured for this provider. Hosted users without BYOK continue on the shared free model.',
+  'models.gatewaySet': 'Your encrypted gateway configuration is set: <span class="m">{url}</span>',
+  'models.gatewayMissing': 'Save your user-owned FreeLLMAPI gateway address and token under Your API keys first.',
+  'models.simpleSet': 'Simple Mode can use your saved keys for: {providers}. It records the actual provider, model, and fallback count.',
+  'models.simpleMissing': 'Save a Gemini or Groq key under Your API keys. No keys are pooled between users.',
+  'models.simpleWarning': 'Exploratory routing only. Use a direct exact provider/model for protocol-frozen or confirmatory work.',
   'models.serverUrl': 'Server address',
   'models.loadModels': 'Load model list',
   'models.serverHint': 'LM Studio, vLLM, llama.cpp\'s llama-server — anything that speaks the OpenAI protocol. Include the trailing <code>/v1</code>.',
@@ -2367,6 +2379,11 @@ en: {
   'models.foundModels': 'Found {n} models',
   'models.foundBilled': ' · <b>a public address, so calls are recorded as billed</b>',
   'models.foundFree': ' · an address on this machine or network, so calls are recorded at $0',
+  'models.routeHistory': 'Recent model routes',
+  'models.routeSelected': 'selected {selected}',
+  'models.routeActual': 'served by {actual}',
+  'models.routeFallbacks': '{n} provider fallback(s)',
+  'models.routeUnknown': 'actual route not reported',
 
   'local.title': 'Local model',
   'local.hint': 'When the API is off or capped, every stage runs on this. The list is what Ollama actually has installed here — pull a new one with <code>ollama pull &lt;name&gt;</code>, then refresh.',
@@ -2426,9 +2443,11 @@ en: {
   'prov.approved': 'approved',
   'prov.empty': 'Nothing has been built in this session yet.',
   'prov.failed': 'The chain could not be read.',
-  'keys.hint': 'Connect your OpenAI, Anthropic or Gemini API key. AI usage is billed directly by your provider.',
+  'keys.hint': 'Simple Mode can route across your Gemini and Groq keys. Advanced users may also connect their own single-user FreeLLMAPI gateway. Credentials stay isolated to your account.',
   'keys.provider': 'Provider',
   'keys.key': 'API key',
+  'keys.gatewayUrl': 'Gateway address',
+  'keys.gatewayNote': 'FreeLLMAPI is single-user by design. Connect only a gateway you own. Hosted accounts require an operator-allowlisted public HTTPS endpoint; localhost is allowed only on a local RAL installation.',
   'keys.placeholder': 'Paste the key',
   'keys.note': 'Keys are stored encrypted and are never shown again — only the first and last few characters.',
   'keys.none': 'No key saved',
@@ -3479,6 +3498,21 @@ async function loadApiKeys() {
   const select = document.getElementById('api-key-provider');
   select.innerHTML = (d.providers || []).map(p =>
     `<option value="${esc(p.provider)}">${esc(p.label)}</option>`).join('');
+  window._keyProviders = d.providers || [];
+  updateApiKeyFields();
+}
+
+function updateApiKeyFields() {
+  const select = document.getElementById('api-key-provider');
+  const provider = select ? select.value : '';
+  const selected = (window._keyProviders || []).find(p => p.provider === provider) || {};
+  const gateway = !!selected.user_configurable_url;
+  document.getElementById('api-key-url-field').hidden = !gateway;
+  document.getElementById('api-key-url-input').value = gateway ? (selected.base_url || '') : '';
+  document.querySelector('label[for="api-key-input"]').textContent =
+    gateway ? 'Gateway token' : t('keys.key');
+  const note = document.querySelector('[data-i18n="keys.note"]');
+  if (note) note.textContent = gateway ? t('keys.gatewayNote') : t('keys.note');
 }
 
 async function saveApiKey() {
@@ -3487,7 +3521,11 @@ async function saveApiKey() {
   try {
     const r = await api('/api/keys/' + encodeURIComponent(provider), {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({key: field.value})
+      body: JSON.stringify({
+        key: field.value,
+        base_url: document.getElementById('api-key-url-field').hidden
+          ? '' : document.getElementById('api-key-url-input').value.trim()
+      })
     });
     const d = await r.json();
     if (!r.ok) { toast(d.detail || t('keys.saveFailed'), 'error'); return; }
@@ -3532,6 +3570,10 @@ async function loadSettingsPanel() {
       provider: effective.label || d.effective_provider,
       model: d.effective_model || t('models.noModel')
     });
+  } else if (d.use_api && d.inference_mode === 'simple_byok') {
+    routeText = t('models.simpleByok', {
+      model: d.effective_model || d.api_model || t('models.noModel')
+    });
   } else if (d.use_api && d.inference_mode === 'byok') {
     routeText = t('models.byok', {
       provider: current.label || d.api_provider,
@@ -3548,12 +3590,21 @@ async function loadSettingsPanel() {
   const select = document.getElementById('provider-select');
   select.innerHTML = _providers.map(p =>
     `<option value="${esc(p.name)}"${p.name === d.api_provider ? ' selected' : ''}>` +
-    `${esc(p.label)}${p.key_set || p.configurable_url ? '' : t('models.noKey')}</option>`).join('');
+    `${esc(p.label)}${p.key_set || p.user_credential_set || p.configurable_url ? '' : t('models.noKey')}</option>`).join('');
   // A provider with no key in .env is still selectable: runs then stay local
   // and say so, which is better than hiding the option and looking broken.
   const urlField = document.getElementById('server-url-field');
   urlField.hidden = !current.configurable_url;
-  if (current.configurable_url) {
+  if (current.managed_router) {
+    const routes = current.configured_routes || [];
+    document.getElementById('provider-help').innerHTML = routes.length
+      ? t('models.simpleSet', {providers: esc(routes.join(', '))})
+      : t('models.simpleMissing');
+  } else if (current.user_configurable_url) {
+    document.getElementById('provider-help').innerHTML = current.user_credential_set
+      ? t('models.gatewaySet', {url: esc(current.user_base_url || '')})
+      : t('models.gatewayMissing');
+  } else if (current.configurable_url) {
     document.getElementById('server-url-input').value = d.local_server_url || '';
     document.getElementById('provider-help').innerHTML = current.ready
       ? t('models.serverSet', {url: esc(current.base_url)})
@@ -3567,13 +3618,27 @@ async function loadSettingsPanel() {
   document.getElementById('model-input').value = d.api_model || '';
   document.getElementById('model-suggestions').innerHTML =
     (current.models || []).map(m => `<option value="${esc(m)}"></option>`).join('');
-  document.getElementById('model-help').textContent =
-    t('models.modelHint');
+  document.getElementById('model-help').textContent = current.managed_router
+    ? t('models.simpleWarning') : t('models.modelHint');
 
   document.getElementById('budget-input').value = d.daily_budget_usd || 0;
   document.getElementById('budget-help').textContent =
     t('models.spentToday', {spent: (d.spend_today_usd || 0).toFixed(2)}) +
     (d.budget_from_env ? t('models.budgetFromEnv') : t('models.budgetFromPage'));
+
+  const history = d.route_history || [];
+  document.getElementById('model-route-history').innerHTML = history.length ?
+    `<div class="m" style="margin-bottom:6px">${t('models.routeHistory')}</div>` +
+    history.map(row => {
+      const selected = [row.provider, row.selected_model || row.model].filter(Boolean).join('/');
+      const actual = [row.actual_provider, row.actual_model].filter(Boolean).join('/');
+      const fallback = row.fallback_attempts
+        ? ` · ${t('models.routeFallbacks', {n: row.fallback_attempts})}` : '';
+      return `<div class="row-item"><div class="grow"><div class="t">${esc(row.task_type)}</div>` +
+        `<div class="m">${t('models.routeSelected', {selected: esc(selected || '—')})} · ` +
+        `${actual ? t('models.routeActual', {actual: esc(actual)}) : t('models.routeUnknown')}${fallback}</div></div>` +
+        `<div class="m">${esc((row.timestamp || '').replace('T', ' '))}</div></div>`;
+    }).join('') : '';
 }
 
 /** Switching provider shows that provider's model and key state right away. */

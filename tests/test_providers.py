@@ -20,6 +20,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "")
     monkeypatch.setattr(config, "OPENAI_API_KEY", "")
     monkeypatch.setattr(config, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(config, "GROQ_API_KEY", "")
     monkeypatch.setattr(config, "API_PROVIDER", "anthropic")
     return tmp_path
 
@@ -51,10 +52,14 @@ class _Recorder:
 def test_three_providers_are_offered_with_their_key_state(env, monkeypatch):
     monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-test")
     described = {p["name"]: p for p in providers.describe()}
-    assert set(described) == {"anthropic", "openai", "gemini", "local_server"}
+    assert set(described) == {
+        "anthropic", "openai", "gemini", "groq", "auto_byok",
+        "freellmapi", "local_server",
+    }
     assert described["openai"]["key_set"] is True
     assert described["anthropic"]["key_set"] is False
     assert described["gemini"]["key_env"] == "GEMINI_API_KEY"
+    assert described["auto_byok"]["managed_router"] is True
     # Every hosted provider suggests models; a server you run yourself is asked
     # at the time, so it ships no list.
     assert all(p["models"] for name, p in described.items() if name != "local_server")
@@ -142,6 +147,26 @@ def test_gemini_is_reached_through_the_openai_endpoint(env, monkeypatch):
     assert built["base_url"] == config.GEMINI_BASE_URL
     assert built["api_key"] == "key-abc"
     assert provider.model == "gemini-2.5-flash"
+
+
+def test_groq_is_reached_through_its_openai_compatible_endpoint(env, monkeypatch):
+    monkeypatch.setattr(config, "GROQ_API_KEY", "groq-key-for-offline-test")
+    built = {}
+
+    class _FakeClient:
+        def __init__(self, api_key=None, base_url=None):
+            built["api_key"] = api_key
+            built["base_url"] = base_url
+
+    monkeypatch.setattr("openai.OpenAI", _FakeClient)
+    provider = providers.build("groq")
+
+    assert isinstance(provider, providers.OpenAICompatibleProvider)
+    assert built == {
+        "api_key": "groq-key-for-offline-test",
+        "base_url": config.GROQ_BASE_URL,
+    }
+    assert provider.model == config.GROQ_MODEL
 
 
 # --- the parts that must not change with the provider --------------------------

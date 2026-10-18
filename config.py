@@ -37,6 +37,11 @@ DATASET_MAX_MB: int = int(os.environ.get("DATASET_MAX_MB", "200"))
 # (tools/url_safety.py). Example: DATASET_ALLOWED_HOSTS=who.int,worldbank.org
 DATASET_ALLOWED_HOSTS: list[str] = [h.strip().lower() for h in
                                     os.environ.get("DATASET_ALLOWED_HOSTS", "").split(",") if h.strip()]
+# Hosted user-configured model gateways are an SSRF boundary, not content URLs.
+# An empty list disables hosted FreeLLMAPI instead of allowing arbitrary hosts.
+FREELLMAPI_ALLOWED_HOSTS: list[str] = [h.strip().lower() for h in
+                                      os.environ.get("FREELLMAPI_ALLOWED_HOSTS", "").split(",")
+                                      if h.strip()]
 
 EXPERIMENTS_DIR = Path(os.environ.get("EXPERIMENTS_DIR") or (BASE_DIR / "experiments"))
 
@@ -159,18 +164,29 @@ RESEND_API_KEY: str = os.environ.get("RESEND_API_KEY", "").strip()
 # is in-memory, and used to fall back to "on" whenever the server restarted.
 USE_API: bool = os.environ.get("USE_API", "1") not in ("0", "false", "False")
 
-# Preferred BYOK backend for new sessions: anthropic | openai | gemini.
+# Preferred BYOK backend for new sessions: auto_byok | anthropic | openai |
+# gemini | groq. auto_byok is a per-user router; it never pools credentials.
 # Hosted users without a key for their selected provider use SHARED_FREE_PROVIDER.
 API_PROVIDER: str = os.environ.get("API_PROVIDER", "gemini").strip().lower()
 
 ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
 GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
+GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
 
 # Model IDs — switch to claude-opus-4-6 for highest quality
 API_MODEL_DEFAULT: str = os.environ.get("API_MODEL", "claude-sonnet-4-5")
 OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-5")
 GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+GROQ_MODEL: str = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+
+# Simple Mode only considers these user-owned providers, in this order. Adding
+# a provider is an explicit product decision, not an inference from stored keys.
+SIMPLE_BYOK_PROVIDERS: list[str] = [
+    name.strip().lower() for name in
+    os.environ.get("SIMPLE_BYOK_PROVIDERS", "gemini,groq").split(",")
+    if name.strip()
+]
 
 # Hosted users without a BYOK key use this server-owned free-tier provider.
 # The key stays server-side and is never returned by an HTTP or WebSocket API.
@@ -187,6 +203,8 @@ SHARED_FREE_MODEL: str = os.environ.get(
 OPENAI_BASE_URL: str = os.environ.get("OPENAI_BASE_URL", "")
 GEMINI_BASE_URL: str = os.environ.get(
     "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+GROQ_BASE_URL: str = os.environ.get(
+    "GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
 # Max tokens to request from the API per call
 # 8192 prevents generated Python files from being truncated mid-function
@@ -272,8 +290,11 @@ TOKEN_COSTS: dict[str, dict[str, float]] = {
     # Gemini — https://ai.google.dev/gemini-api/docs/pricing
     "gemini-3.8-flash": {"input": 0.75, "output": 3.75},
     "gemini-3.7-flash": {"input": 0.75, "output": 3.75},
+    "gemini-3.5-flash-lite": {"input": 0.30, "output": 2.50},
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
     "gemini-2.5-pro":   {"input": 1.25, "output": 10.00},   # prompts up to 200k tokens
+    # Groq — https://console.groq.com/docs/model/openai/gpt-oss-20b
+    "openai/gpt-oss-20b": {"input": 0.075, "output": 0.30},
 }
 
 # What an unlisted model is assumed to cost. Deliberately high: a spending cap

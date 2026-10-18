@@ -191,6 +191,7 @@ class SourceDecisionRequest(BaseModel):
 
 class ApiKeyRequest(BaseModel):
     key: str
+    base_url: str = ""
 
 
 class ProjectRequest(BaseModel):
@@ -223,6 +224,18 @@ def _effective_inference_route(request: Request, enabled: bool, provider: str) -
 
     if not enabled:
         return {"inference_mode": "off", "effective_provider": "", "effective_model": ""}
+    if provider == "auto_byok":
+        from memory import api_keys
+        user = _current_user(request)
+        user_id = user.user_id if user is not None else api_keys.LOCAL_USER
+        stored = {item.provider for item in api_keys.list_keys(user_id)}
+        routes = [name for name in config.SIMPLE_BYOK_PROVIDERS if name in stored]
+        return {
+            "inference_mode": "simple_byok",
+            "effective_provider": "auto_byok",
+            "effective_model": app_settings.api_model("auto_byok"),
+            "configured_routes": routes,
+        }
     if config.HOSTED:
         from memory import api_keys
         user = _current_user(request)
@@ -262,13 +275,33 @@ async def get_settings(request: Request, session_id: str = ""):
         session = NoteDB().get_session(session_id)
     enabled, provider = _session_inference_settings(session)
     route = _effective_inference_route(request, enabled, provider)
+    provider_rows = providers.describe()
+    try:
+        from memory import api_keys
+        user = _current_user(request)
+        user_id = user.user_id if user else api_keys.LOCAL_USER
+        credentials = {row["provider"]: row for row in
+                       api_keys.describe(user_id)["providers"]}
+        for row in provider_rows:
+            credential = credentials.get(row["name"], {})
+            row["user_credential_set"] = bool(credential.get("stored"))
+            if row["name"] == "freellmapi":
+                row["user_base_url"] = credential.get("base_url", "")
+            elif row["name"] == "auto_byok":
+                routes = [name for name in config.SIMPLE_BYOK_PROVIDERS
+                          if credentials.get(name, {}).get("stored")]
+                row["configured_routes"] = routes
+                row["user_credential_set"] = bool(routes)
+    except Exception as exc:
+        logger.warning("Could not describe per-user provider configuration: %s", exc)
+    route_history = CostTracker().session_routes(session_id, limit=20) if session_id else []
     return {"use_api": enabled, **route, "spend_today_usd": round(spent, 4),
             "daily_budget_usd": app_settings.daily_budget_usd(),
             "budget_from_env": app_settings.load()["daily_budget_usd"] is None,
             "api_provider": provider,
             "api_model": app_settings.api_model(provider),
             "local_server_url": app_settings.local_server_url(),
-            "providers": providers.describe()}
+            "providers": provider_rows, "route_history": route_history}
 
 
 @app.post("/api/settings")
@@ -584,12 +617,40 @@ async def save_api_key(provider: str, req: ApiKeyRequest, request: Request):
 
     user = _require_user(request)
     try:
-        api_keys.store(user.user_id if user else api_keys.LOCAL_USER, provider, req.key)
+        user_id = user.user_id if user else api_keys.LOCAL_USER
+        if provider.strip().lower() == "freellmapi":
+            api_keys.store_gateway(user_id, req.base_url, req.key)
+        else:
+            api_keys.store(user_id, provider, req.key)
     except api_keys.ApiKeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:                        # an unknown provider name
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return await list_api_keys(request)
+
+
+@app.get("/api/freellmapi/models")
+async def freellmapi_models(request: Request):
+    """Read models from only the signed-in user's validated gateway."""
+    from memory import api_keys
+
+    user = _require_user(request)
+    user_id = user.user_id if user else api_keys.LOCAL_USER
+    gateway = api_keys.get_gateway(user_id)
+    if gateway is None:
+        raise HTTPException(status_code=400, detail="Save your FreeLLMAPI gateway first.")
+    try:
+        from models import providers
+        models = providers.list_gateway_models(gateway.token, gateway.base_url)
+    except Exception as exc:
+        logger.warning("Could not read the current user's FreeLLMAPI model list (%s).",
+                       type(exc).__name__)
+        raise HTTPException(
+            status_code=502,
+            detail="The gateway could not be reached or rejected its token.") from exc
+    api_keys.mark_used(user_id, "freellmapi")
+    return {"base_url": gateway.base_url, "models": models,
+            "tested_contract": "FreeLLMAPI v0.13.4"}
 
 
 @app.delete("/api/keys/{provider}")

@@ -90,6 +90,15 @@ These are not preferences; each one is a way for this to go wrong in public.
 - **The shared free route has provider quotas, not an SLA.** It never falls
   through to a paid provider. If its quota or authentication fails, the run
   preserves its state and asks the user to retry later or configure BYOK.
+- **FreeLLMAPI is not a shared hosted credential pool.** Its upstream security
+  model is single-user. RAL accepts it only as a per-user, user-owned gateway;
+  hosted URLs must be public HTTPS and explicitly listed in
+  `FREELLMAPI_ALLOWED_HOSTS`, and credentials remain encrypted per user.
+  See `docs/FREELLMAPI_INTEGRATION.md` before enabling it.
+- **Simple Mode is not a shared gateway.** It routes in-process across only the
+  signed-in user's encrypted Gemini/Groq keys. No separate FreeLLMAPI service
+  is required, and no operator key or other user's key enters its fallback
+  chain. Use an exact direct route for frozen or confirmatory work.
 - **Local models are not available on a hosted box.** Ollama and GGUF models
   are for the copy someone runs themselves. With Model API OFF, a hosted run
   pauses before the next model-dependent phase. With it ON, a run uses BYOK or

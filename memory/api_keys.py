@@ -24,6 +24,7 @@ operator's credit.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import secrets
@@ -31,6 +32,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 import config
 
@@ -60,6 +62,48 @@ class StoredKey:
         return {"provider": self.provider, "hint": self.hint,
                 "created_at": self.created_at, "updated_at": self.updated_at,
                 "last_used_at": self.last_used_at}
+
+
+@dataclass(frozen=True)
+class GatewayCredential:
+    """Decrypted only at the moment its owning user's gateway is configured."""
+    base_url: str
+    token: str
+
+
+def normalize_gateway_url(value: str, *, hosted: bool | None = None) -> str:
+    """Validate and canonicalise a user-owned OpenAI-compatible gateway URL.
+
+    Hosted RAL may only reach public HTTPS endpoints. Local RAL deliberately
+    permits localhost/private addresses because FreeLLMAPI is local-first.
+    """
+    raw = (value or "").strip()
+    parsed = urlparse(raw)
+    is_hosted = config.HOSTED if hosted is None else bool(hosted)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ApiKeyError("The gateway address must be an http(s) URL.")
+    if parsed.username or parsed.password:
+        raise ApiKeyError("Do not put gateway credentials in the URL.")
+    if parsed.query or parsed.fragment:
+        raise ApiKeyError("The gateway address cannot contain a query or fragment.")
+    path = parsed.path.rstrip("/")
+    if path not in ("", "/v1"):
+        raise ApiKeyError("The gateway address must be its origin, optionally followed by /v1.")
+    if is_hosted:
+        if parsed.scheme != "https":
+            raise ApiKeyError("Hosted accounts may only use an HTTPS gateway address.")
+        allowed = config.FREELLMAPI_ALLOWED_HOSTS
+        if not allowed:
+            raise ApiKeyError(
+                "Hosted FreeLLMAPI is disabled until the operator sets "
+                "FREELLMAPI_ALLOWED_HOSTS.")
+        from tools.url_safety import UnsafeURL, check_url
+        try:
+            check_url(urlunparse((parsed.scheme, parsed.netloc, "/v1", "", "", "")),
+                      allow_hosts=allowed)
+        except UnsafeURL as exc:
+            raise ApiKeyError(f"Unsafe gateway address: {exc}") from exc
+    return urlunparse((parsed.scheme, parsed.netloc, "/v1", "", "", ""))
 
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
@@ -165,7 +209,11 @@ def store(user_id: str, provider: str, key: str, db_path: Path | None = None) ->
     """Keep this person's key for this provider, replacing any earlier one."""
     from models import providers
 
-    providers.resolve(provider)                    # an unknown provider is a mistake
+    info = providers.resolve(provider)             # an unknown provider is a mistake
+    if info.managed_router:
+        raise ApiKeyError("Automatic routing uses your separately stored provider keys.")
+    if provider == "freellmapi":
+        raise ApiKeyError("FreeLLMAPI needs both its gateway address and token.")
     key = (key or "").strip()
     if not key:
         raise ApiKeyError("Paste the key before saving it.")
@@ -192,6 +240,61 @@ def store(user_id: str, provider: str, key: str, db_path: Path | None = None) ->
         conn.close()
     logger.info("Stored an API key for provider %s.", provider)   # never the key
     return StoredKey(provider, hint_for(key), created, now, "")
+
+
+def store_gateway(user_id: str, base_url: str, token: str,
+                  db_path: Path | None = None) -> StoredKey:
+    """Store one user's FreeLLMAPI endpoint and bearer token as one AEAD record."""
+    token = (token or "").strip()
+    if len(token) < MIN_KEY_LENGTH:
+        raise ApiKeyError("That does not look like a gateway token — it is too short.")
+    if any(ch.isspace() for ch in token):
+        raise ApiKeyError("A gateway token has no spaces in it; check what was pasted.")
+    address = normalize_gateway_url(base_url)
+    provider = "freellmapi"
+    payload = json.dumps({"base_url": address, "token": token}, separators=(",", ":"))
+    now = _now()
+    conn = _connect(db_path)
+    try:
+        existing = conn.execute(
+            "SELECT created_at FROM user_api_keys WHERE user_id = ? AND provider = ?",
+            (user_id, provider)).fetchone()
+        created = existing["created_at"] if existing else now
+        conn.execute(
+            "INSERT INTO user_api_keys (user_id, provider, secret, hint, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, provider) DO UPDATE SET secret = excluded.secret, "
+            "hint = excluded.hint, updated_at = excluded.updated_at",
+            (user_id, provider, _encrypt(user_id, provider, payload),
+             hint_for(token), created, now))
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("Stored a per-user FreeLLMAPI gateway credential.")
+    return StoredKey(provider, hint_for(token), created, now, "")
+
+
+def get_gateway(user_id: str, db_path: Path | None = None) -> GatewayCredential | None:
+    """Return this user's gateway configuration, never another user's or a server default."""
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT secret FROM user_api_keys WHERE user_id = ? AND provider = 'freellmapi'",
+            (user_id,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(_decrypt(user_id, "freellmapi", row["secret"]))
+        return GatewayCredential(
+            base_url=normalize_gateway_url(payload["base_url"]),
+            token=str(payload["token"]),
+        )
+    except Exception as exc:
+        logger.warning("The stored FreeLLMAPI gateway could not be read (%s); treating it as absent.",
+                       type(exc).__name__)
+        return None
 
 
 def remove(user_id: str, provider: str, db_path: Path | None = None) -> bool:
@@ -227,6 +330,9 @@ def get(user_id: str, provider: str, db_path: Path | None = None) -> str:
     A row that will not decrypt is a damaged or moved row, not a reason to
     stop the run: it is reported and treated as absent.
     """
+    if provider == "freellmapi":
+        gateway = get_gateway(user_id, db_path=db_path)
+        return gateway.token if gateway else ""
     conn = _connect(db_path)
     try:
         row = conn.execute(
@@ -307,12 +413,19 @@ def describe(user_id: str, db_path: Path | None = None) -> dict:
         if not info.needs_key:
             continue
         env_key = info.key()
-        out.append({
+        entry = {
             "provider": info.name,
             "label": info.label,
             "docs": info.docs,
+            "user_configurable_url": info.user_configurable_url,
             "stored": stored.get(info.name),
             "server_key_available": bool(env_key) and server_key_allowed,
             "usable": bool(stored.get(info.name)) or (bool(env_key) and server_key_allowed),
-        })
+        }
+        if info.name == "freellmapi" and stored.get(info.name):
+            gateway = get_gateway(user_id, db_path=db_path)
+            entry["base_url"] = gateway.base_url if gateway else ""
+            entry["server_key_available"] = False
+            entry["usable"] = gateway is not None
+        out.append(entry)
     return {"providers": out, "server_key_allowed": server_key_allowed}

@@ -226,6 +226,32 @@ def test_a_bad_key_is_refused_with_the_reason_shown(client):
     assert refused.status_code == 400 and "too short" in refused.json()["detail"]
 
 
+def test_freellmapi_gateway_is_saved_per_user_without_returning_its_token(client):
+    token = "freellmapi-test-token-not-a-secret"
+    saved = client.put("/api/keys/freellmapi", json={
+        "key": token,
+        "base_url": "http://localhost:3001",
+    })
+    assert saved.status_code == 200
+    assert token not in saved.text
+    gateway = next(p for p in saved.json()["providers"]
+                   if p["provider"] == "freellmapi")
+    assert gateway["base_url"] == "http://localhost:3001/v1"
+    assert gateway["stored"]["hint"] == "freell…cret"
+
+
+def test_hosted_freellmapi_gateway_rejects_http_and_private_addresses(
+    client, monkeypatch
+):
+    monkeypatch.setattr(config, "HOSTED", True)
+    rejected = client.put("/api/keys/freellmapi", json={
+        "key": "freellmapi-test-token-not-a-secret",
+        "base_url": "http://127.0.0.1:3001/v1",
+    })
+    assert rejected.status_code == 400
+    assert "HTTPS" in rejected.json()["detail"]
+
+
 def test_one_account_cannot_see_or_touch_another_accounts_keys(client):
     _verified_signup(client, "owner@example.com")
     client.put("/api/keys/anthropic", json={"key": REAL_KEY})

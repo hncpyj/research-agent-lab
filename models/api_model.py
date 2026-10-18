@@ -51,6 +51,7 @@ class APIModel:
         session_id: str = "",          # so each call's cost lands on the right session
         user_id: str | None = None,    # whose stored key to use; None = the server's own
         enabled: bool = True,          # authoritative external-model permission for this run
+        base_url: str | None = None,   # explicit OpenAI-compatible gateway endpoint
     ) -> None:
         self._tracker = cost_tracker or CostTracker()
         self.session_id = session_id
@@ -59,6 +60,7 @@ class APIModel:
         self._budget_warned = False
         self._user_id = user_id
         self._explicit_api_key = api_key
+        self._explicit_base_url = base_url
         self._enabled = False
         self._routing_mode = "off"
         self._provider_error = ""
@@ -68,6 +70,7 @@ class APIModel:
         self._model = ""
         self._provider = None
         self._api_available = False
+        self._last_route: dict = {}
 
         self.configure(enabled=enabled, provider=provider, model=model,
                        api_key=api_key, user_id=user_id)
@@ -80,12 +83,15 @@ class APIModel:
         model: str | None = None,
         api_key: str | None = None,
         user_id: str | None = None,
+        base_url: str | None = None,
     ) -> None:
         """Apply the authoritative route without ever exposing a credential."""
         if user_id is not None:
             self._user_id = user_id
         if api_key is not None:
             self._explicit_api_key = api_key
+        if base_url is not None:
+            self._explicit_base_url = base_url
         self._enabled = bool(enabled)
         self._routing_mode = "off" if not self._enabled else "configured"
         self._provider_error = ""
@@ -105,16 +111,43 @@ class APIModel:
         if not self._enabled:
             return
 
+        # Simple Mode is an in-process, per-user router. It reads only this
+        # account's encrypted direct-provider keys and never constructs a
+        # shared credential pool. Advanced FreeLLMAPI remains a separate path.
+        if selected_provider == "auto_byok":
+            from memory import api_keys
+
+            owner_id = self._user_id if self._user_id is not None else api_keys.LOCAL_USER
+            credentials = {
+                name: api_keys.get(owner_id, name)
+                for name in config.SIMPLE_BYOK_PROVIDERS
+                if name in {"gemini", "groq"}
+            }
+            self._routing_mode = "simple_byok"
+            try:
+                self._provider = providers.build_simple_router(self._model, credentials)
+                self._api_available = True
+                return
+            except providers.ProviderUnavailable as exc:
+                self._provider_error = str(exc)
+                logger.warning("%s — Simple Mode is unavailable.", exc)
+                return
+
         # Hosted routing has one explicit precedence: selected BYOK first,
         # otherwise the shared free provider. The server's paid/default key is
         # never an implicit fallback for a hosted account.
         chosen_key = self._explicit_api_key
+        chosen_base_url = self._explicit_base_url
         if chosen_key is None and config.HOSTED:
             from memory import api_keys
-            own_key = api_keys.get(self._user_id, selected_provider) if self._user_id else ""
+            gateway = (api_keys.get_gateway(self._user_id)
+                       if self._user_id and selected_provider == "freellmapi" else None)
+            own_key = (gateway.token if gateway else
+                       api_keys.get(self._user_id, selected_provider) if self._user_id else "")
             if own_key:
                 api_keys.mark_used(self._user_id, selected_provider)
                 chosen_key = own_key
+                chosen_base_url = gateway.base_url if gateway else chosen_base_url
                 self._routing_mode = "byok"
             else:
                 self._provider_name = config.SHARED_FREE_PROVIDER
@@ -127,10 +160,21 @@ class APIModel:
                     return
         elif chosen_key is None and self._user_id is not None:
             from memory import api_keys
-            chosen_key = api_keys.key_for(self._user_id, selected_provider)
+            if selected_provider == "freellmapi":
+                gateway = api_keys.get_gateway(self._user_id)
+                if gateway:
+                    chosen_key, chosen_base_url = gateway.token, gateway.base_url
+                    api_keys.mark_used(self._user_id, selected_provider)
+            else:
+                chosen_key = api_keys.key_for(self._user_id, selected_provider)
 
         try:
-            self._provider = providers.build(self._provider_name, chosen_key, self._model)
+            if chosen_base_url:
+                self._provider = providers.build(
+                    self._provider_name, chosen_key, self._model, base_url=chosen_base_url)
+            else:
+                self._provider = providers.build(
+                    self._provider_name, chosen_key, self._model)
             self._model = self._provider.model
             self._api_available = True
         except providers.ProviderUnavailable as exc:
@@ -167,6 +211,10 @@ class APIModel:
             "provider": self._provider_name if self._enabled else "",
             "model": self._model if self._enabled else "",
         }
+
+    def last_route_info(self) -> dict:
+        """Routing evidence from the latest successful call, without credentials."""
+        return dict(self._last_route)
 
     def ensure_available(self, task_name: str = "this phase") -> None:
         """Fail before a model-dependent phase without making a provider call."""
@@ -260,7 +308,7 @@ class APIModel:
                     "provider quota. Your completed research is preserved. Retry later or "
                     "configure your own API provider."
                 ) from exc
-            if config.HOSTED and self._routing_mode == "byok":
+            if config.HOSTED and self._routing_mode in ("byok", "simple_byok"):
                 raise BYOKProviderUnavailable(
                     f"The selected {self._provider_name} BYOK provider could not complete "
                     "the request. Your completed research is preserved; check its key, "
@@ -269,6 +317,11 @@ class APIModel:
             logger.warning("API unreachable: %s — switching to local fallback.", exc)
             self._api_available = False
             return self._local_fallback(prompt, system, task_name, max_tokens)
+        except providers.ProviderRouteViolation as exc:
+            raise ProviderRouteMismatch(
+                "The gateway did not prove that the authorized exact model served the request. "
+                "The response was rejected and no local/model substitution was accepted."
+            ) from exc
         except Exception as exc:
             # Anything _call_with_retry did not turn into _NetworkError and the
             # provider calls fatal: billing or credit errors, a model this key
@@ -281,7 +334,7 @@ class APIModel:
                     "The free hosted model rejected the request. Your completed research "
                     "is preserved. Retry later or configure your own API provider."
                 ) from exc
-            if config.HOSTED and self._routing_mode == "byok":
+            if config.HOSTED and self._routing_mode in ("byok", "simple_byok"):
                 raise BYOKProviderUnavailable(
                     f"The selected {self._provider_name} BYOK provider rejected the request. "
                     "Your completed research is preserved; check its model access and retry."
@@ -416,30 +469,56 @@ class APIModel:
 
         for attempt in range(_MAX_RETRIES):
             try:
-                text, input_tokens, output_tokens = self._provider.send(
+                raw_result = self._provider.send(
                     system=system,
                     messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
+                if isinstance(raw_result, providers.ProviderResult):
+                    result = raw_result
+                else:
+                    text, input_tokens, output_tokens = raw_result
+                    result = providers.ProviderResult(text, input_tokens, output_tokens)
+                self._last_route = {
+                    "selected_provider": self._provider_name,
+                    "selected_model": self._model,
+                    "actual_provider": result.actual_provider,
+                    "actual_model": result.actual_model,
+                    "fallback_attempts": result.fallback_attempts,
+                }
+                if (self._routing_mode == "simple_byok" and self._user_id is not None
+                        and result.actual_provider):
+                    from memory import api_keys
+                    api_keys.mark_used(self._user_id, result.actual_provider)
                 # Cost logging must never be able to fail a real API call —
                 # a DB write hiccup here shouldn't corrupt or crash a
                 # response we already successfully received.
                 try:
                     cost = self._tracker.log(
-                        model=self._model,
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
+                        model=result.actual_model or self._model,
+                        input_tokens=result.input_tokens,
+                        output_tokens=result.output_tokens,
                         task_type=task_name,
                         # A server on this machine bills nothing; pricing it
                         # would put money that was never spent against the
                         # daily cap and stop a run for no reason.
                         is_local=self._provider.free or self._routing_mode == "shared_free",
                         session_id=self.session_id,
+                        provider=self._provider_name,
+                        selected_model=self._model,
+                        actual_provider=result.actual_provider,
+                        actual_model=result.actual_model,
+                        routing_policy=(self._model if self._provider_name in
+                                        {"freellmapi", "auto_byok"} else "direct"),
+                        fallback_attempts=result.fallback_attempts,
+                        fallback_trail=result.fallback_trail,
+                        retry_count=attempt,
+                        cost_known=getattr(self._provider, "billing_known", True),
                     )
                     logger.info(
                         "API call OK: task=%s in=%d out=%d cost=$%.4f",
-                        task_name, input_tokens, output_tokens, cost,
+                        task_name, result.input_tokens, result.output_tokens, cost,
                     )
                 except Exception as log_exc:
                     logger.warning(
@@ -447,12 +526,24 @@ class APIModel:
                         task_name, log_exc,
                     )
 
-                return text
+                return result.text
 
             except Exception as exc:
                 # How to read an error is the one thing that differs between
                 # providers; what to do about it does not.
                 kind = self._provider.classify(exc)
+                try:
+                    safe_message = self._redact_provider_error(exc)
+                    self._tracker.log_provider_event(
+                        session_id=self.session_id, task_type=task_name,
+                        event_type="retry" if kind == providers.RETRY else "failure",
+                        provider=self._provider_name, selected_model=self._model,
+                        retry_count=attempt, error_type=type(exc).__name__,
+                        error_message=safe_message,
+                    )
+                except Exception as log_exc:
+                    logger.warning("Provider event logging failed for task=%s: %s",
+                                   task_name, log_exc)
                 if kind == providers.QUOTA:
                     raise _ProviderQuotaError(self._provider_name) from exc
                 if kind == providers.AUTH:
@@ -473,6 +564,19 @@ class APIModel:
         raise _NetworkError(
             f"API call failed after {_MAX_RETRIES} attempts (rate-limit or server errors)"
         ) from last_exc
+
+    def _redact_provider_error(self, exc: Exception) -> str:
+        """Remove every credential this model instance could have sent."""
+        message = str(exc)
+        secrets = {
+            self._explicit_api_key or "",
+            getattr(self._provider, "api_key", "") if self._provider is not None else "",
+        }
+        secrets.update(getattr(self._provider, "secrets", ()) if self._provider is not None else ())
+        for secret in secrets:
+            if secret:
+                message = message.replace(secret, "[redacted]")
+        return message
 
 
 class _NetworkError(Exception):
@@ -501,3 +605,7 @@ class SharedProviderUnavailable(InferenceUnavailable):
 
 class BYOKProviderUnavailable(InferenceUnavailable):
     """The explicitly selected user-owned provider could not answer."""
+
+
+class ProviderRouteMismatch(InferenceUnavailable):
+    """An exact-model gateway request was substituted or could not be verified."""

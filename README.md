@@ -380,9 +380,14 @@ Supported adapter types include:
 | Anthropic | `ANTHROPIC_API_KEY`, `API_MODEL` |
 | OpenAI | `OPENAI_API_KEY`, `OPENAI_MODEL` |
 | Gemini | `GEMINI_API_KEY`, `GEMINI_MODEL` |
+| Groq | `GROQ_API_KEY`, `GROQ_MODEL` |
+| Automatic BYOK | Save per-user Gemini/Groq keys, then select `auto_byok` |
+| FreeLLMAPI | Per-user gateway URL and unified token in Settings |
 | OpenAI-compatible local server | Configure URL and model in Settings |
 
 An adapter being present does **not** imply that the provider is permitted for a particular run.
+
+Simple Mode routes directly across the signed-in user's own Gemini/Groq keys, so no separate gateway installation is required. Advanced FreeLLMAPI remains supported only as a user-owned, single-user gateway. Neither mode pools credentials across users. Automatic routes retain the actual provider/model and fallback trail, while an exact gateway-model request fails closed if the gateway cannot prove which model served it. See [the integration and security contract](docs/FREELLMAPI_INTEGRATION.md).
 
 Provider availability, user intent, deployment policy, and the effective inference mode are separate concerns.
 
@@ -408,6 +413,10 @@ No remote LLM or remote embedding inference should occur.
 ### API enabled with an explicit provider
 
 When the user explicitly selects a provider, the run should use that provider and report failures against that provider accurately.
+
+### Simple automatic BYOK routing
+
+Users may save Gemini and/or Groq keys and select `Automatic (your Gemini + Groq keys)`. RAL then performs a bounded fallback using only that user's encrypted credentials and records which provider/model actually answered. This flexible route is for exploratory workflows; protocol-frozen and confirmatory work must select an exact provider/model and may not silently substitute one.
 
 ### Hosted shared-provider deployments
 

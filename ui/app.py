@@ -751,7 +751,7 @@ async def delete_api_key(provider: str, request: Request):
 
 
 @app.get("/api/environment")
-async def environment():
+async def environment(request: Request):
     """
     What this server is running with. Read-only: these come from .env, and a
     web request must not be able to rewrite the file that holds the API key.
@@ -759,7 +759,13 @@ async def environment():
     """
     import sys as _sys
 
+    from models import providers
+
+    _require_user(request)
+    configured_provider = providers.resolve(config.API_PROVIDER)
+
     return {
+        "hosted": config.HOSTED,
         "python": _sys.version.split()[0],
         "runner_python": config.RUNNER_PYTHON,
         "runner_allow_pip": config.RUNNER_ALLOW_PIP,
@@ -769,7 +775,7 @@ async def environment():
         "gemini_key_set": bool(config.GEMINI_API_KEY),
         "groq_key_set": bool(config.GROQ_API_KEY),
         "api_provider": config.API_PROVIDER,
-        "api_model": config.API_MODEL_DEFAULT,
+        "api_model": configured_provider.default_model,
         "ollama_host": config.OLLAMA_HOST,
         "ollama_model": config.OLLAMA_MODEL,
         "ollama_num_ctx": config.OLLAMA_NUM_CTX,
@@ -1268,6 +1274,8 @@ async def account_me(request: Request):
 @app.get("/api/access/tokens")
 async def list_access_tokens():
     """Every token that opens this server, masked."""
+    if config.HOSTED:
+        raise HTTPException(status_code=404, detail="Access-token controls are not available in hosted mode.")
     from ui.access import list_tokens
     return {"tokens": list_tokens(), "locked": bool(list_tokens())}
 
@@ -1278,6 +1286,8 @@ async def create_access_token(req: NewTokenRequest, request: Request):
     Make a token. The full value is in this one response; afterwards the list
     shows it masked and it can be revealed one at a time by someone signed in.
     """
+    if config.HOSTED:
+        raise HTTPException(status_code=404, detail="Access-token controls are not available in hosted mode.")
     from ui.access import create_token, locked
 
     was_open = not locked()
@@ -1293,6 +1303,8 @@ async def create_access_token(req: NewTokenRequest, request: Request):
 @app.get("/api/access/tokens/{token_id}")
 async def reveal_access_token(token_id: str):
     """The full value of one token, for someone already signed in."""
+    if config.HOSTED:
+        raise HTTPException(status_code=404, detail="Access-token controls are not available in hosted mode.")
     from ui.access import reveal
     token = reveal(token_id)
     if token is None:
@@ -1302,6 +1314,8 @@ async def reveal_access_token(token_id: str):
 
 @app.delete("/api/access/tokens/{token_id}")
 async def revoke_access_token(token_id: str):
+    if config.HOSTED:
+        raise HTTPException(status_code=404, detail="Access-token controls are not available in hosted mode.")
     from ui.access import revoke_token
     if not revoke_token(token_id):
         raise HTTPException(status_code=400,
@@ -1340,13 +1354,19 @@ async def dashboard(request: Request):
         if len(recent) < 8:
             recent.append(row)
 
+    user = _current_user(request)
+    user_id = user.user_id if user else ""
+    usage = {}
     spent = 0.0
     try:
-        spent = CostTracker().spend_today()
+        usage = CostTracker().today_usage_details(user_id)
+        spent = usage["estimated_cost_usd"]
     except Exception as exc:
         logger.warning("Could not read today's API spend: %s", exc)
-    backups = list_backups()
-    db_bytes = Path(config.SQLITE_PATH).stat().st_size if Path(config.SQLITE_PATH).exists() else 0
+    enabled, _, _ = _account_inference_defaults(user_id)
+    backups = [] if config.HOSTED else list_backups()
+    db_bytes = (Path(config.SQLITE_PATH).stat().st_size
+                if not config.HOSTED and Path(config.SQLITE_PATH).exists() else 0)
 
     critical = 0
     for s in sessions:
@@ -1359,9 +1379,11 @@ async def dashboard(request: Request):
         "waiting_for_you": waiting,
         "recent": recent,
         "spend": {"today_usd": round(spent, 4), "daily_budget_usd": app_settings.daily_budget_usd(),
-                  "use_api": _settings["use_api"]},
+                  "use_api": enabled, "usage": usage},
         "critical_degradations": critical,
-        "storage": {"database_bytes": db_bytes, "backups": len(backups),
+        "hosted": config.HOSTED,
+        "storage": {"visible": not config.HOSTED, "database_bytes": db_bytes,
+                    "backups": len(backups),
                     "latest_backup": backups[0] if backups else None},
     }
 
@@ -2067,12 +2089,16 @@ async def remove_session_endpoint(session_id: str):
 
 @app.get("/api/backups")
 async def list_backups_endpoint():
+    if config.HOSTED:
+        raise HTTPException(status_code=404, detail="Backup controls are operator-only in hosted mode.")
     from memory.backup import list_backups
     return {"backups": list_backups(), "folder": str(Path(config.DB_DIR) / "backups")}
 
 
 @app.post("/api/backups")
 async def make_backup():
+    if config.HOSTED:
+        raise HTTPException(status_code=404, detail="Backup controls are operator-only in hosted mode.")
     from memory.backup import backup_db
     path = backup_db("manual")
     return {"status": "ok", "file": path.as_posix(), "bytes": path.stat().st_size}

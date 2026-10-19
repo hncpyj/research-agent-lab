@@ -111,6 +111,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .nav-tab.active { background: var(--accent-bg); color: var(--accent-2); }
 .view { flex: 1; overflow-y: auto; padding: 28px 32px 64px; }
 .view[hidden] { display: none; }
+[hidden] { display: none !important; }
 .view-head { margin-bottom: 22px; }
 .view-head h1 { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
 .view-head p { font-size: 13px; color: var(--text-1); margin: 0; max-width: 70ch; }
@@ -196,7 +197,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .login-box p { font-size: 12.5px; color: var(--text-1); margin: 0; }
 .login-error { font-size: 12.5px; color: var(--red); min-height: 16px; }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .view { padding: 20px 16px 48px; }
   .kv { grid-template-columns: 1fr; }
   /* The bar cannot hold logo, four tabs and the buttons on one line; the tabs
@@ -1895,7 +1896,7 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
       <div class="inline-form">
         <div class="field" style="margin:0;flex:1">
           <label for="project-name" data-i18n="projects.newName">Name for a new project</label>
-          <input id="project-name" data-i18n-ph="projects.newPlaceholder" placeholder="e.g. Clean cooking adoption">
+          <input id="project-name" autocomplete="off" data-i18n-ph="projects.newPlaceholder" placeholder="e.g. Clean cooking adoption">
         </div>
         <button class="btn-primary btn-sm" onclick="createProject()" data-i18n="projects.create">Create project</button>
       </div>
@@ -1914,7 +1915,7 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
         </table>
       </div>
     </div>
-    <div class="panel">
+    <div class="panel" id="backup-panel">
       <h2 data-i18n="manage.backups">Backups</h2>
       <p class="hint" data-i18n="manage.backups.hint"></p>
       <div class="inline-form" style="margin-bottom:12px">
@@ -1929,7 +1930,7 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
   <section class="view" id="view-settings" hidden>
     <div class="view-head">
       <h1 data-i18n="settings.title">Settings</h1>
-      <p data-i18n-html="settings.lede"></p>
+      <p id="settings-persistence-hint" data-i18n-html="settings.lede"></p>
     </div>
 
     <div class="panel" id="account-settings-panel">
@@ -3164,7 +3165,7 @@ async function loadDashboard() {
   const backupText = noBackup ? t('dash.card.backups.none')
     : t('dash.card.backups.latest',
         {when: esc(d.storage.latest_backup.made_at.slice(0, 16).replace('T', ' '))});
-  document.getElementById('dash-cards').innerHTML = [
+  const cards = [
     `<div class="card"><span class="k">${t('dash.card.sessions')}</span><span class="v">${d.sessions.total}</span>
       <span class="s">${t('dash.card.sessions.sub', {running: d.sessions.running, waiting: d.sessions.waiting})}</span></div>`,
     `<div class="card${d.sessions.waiting ? ' warn' : ''}"><span class="k">${t('dash.card.waiting')}</span>
@@ -3174,11 +3175,14 @@ async function loadDashboard() {
       <span class="s">${capText} · ${t('dash.card.spend.api', {state: d.spend.use_api ? t('models.on') : t('models.off').split(' —')[0]})}</span></div>`,
     `<div class="card${d.critical_degradations ? ' warn' : ''}"><span class="k">${t('dash.card.degradations')}</span>
       <span class="v">${d.critical_degradations}</span><span class="s">${t('dash.card.degradations.sub')}</span></div>`,
+  ];
+  if (d.storage.visible) cards.push(
     `<div class="card${noBackup ? ' warn' : ''}"><span class="k">${t('dash.card.backups')}</span>
       <span class="v">${d.storage.backups}</span><span class="s">${backupText}</span></div>`,
     `<div class="card"><span class="k">${t('dash.card.database')}</span><span class="v">${_mb(d.storage.database_bytes)}</span>
-      <span class="s">research.db</span></div>`,
-  ].join('');
+      <span class="s">research.db</span></div>`
+  );
+  document.getElementById('dash-cards').innerHTML = cards.join('');
 
   document.getElementById('dash-waiting').innerHTML = d.waiting_for_you.length
     ? d.waiting_for_you.map(s => _sessionRow(s, gateName(s.stage))).join('')
@@ -3395,7 +3399,15 @@ async function removeSessionById(sessionId, topic) {
 
 async function loadBackups() {
   let d;
-  try { d = await (await api('/api/backups')).json(); } catch(e) { return; }
+  try {
+    const r = await api('/api/backups');
+    if (r.status === 404) {
+      document.getElementById('backup-panel').hidden = true;
+      return;
+    }
+    d = await r.json();
+  } catch(e) { return; }
+  document.getElementById('backup-panel').hidden = false;
   const rows = (d.backups || []).map(b => `
     <div class="row-item">
       <div class="grow"><div class="t">${esc(b.name)}</div>
@@ -3605,6 +3617,9 @@ async function loadSettingsPanel() {
   let d;
   try { d = await (await api(_settingsUrl())).json(); } catch(e) { return; }
   window._settingsSnapshot = d;
+  document.getElementById('settings-persistence-hint').textContent = d.hosted
+    ? 'Account settings are stored securely and survive restarts. Operator-managed deployment values are read-only.'
+    : 'Settings are stored locally and survive restarts. Values supplied by .env are read-only and need a restart.';
   document.getElementById('models-scope-hint').textContent = state.currentId
     ? 'These controls apply to the open research session. Its provider choice remains durable across refresh and resume.'
     : 'These are account defaults for new sessions. Existing sessions keep their own provider choice.';
@@ -3645,12 +3660,13 @@ async function loadSettingsPanel() {
     : d.api_provider === 'freellmapi' ? 'advanced' : 'single';
   document.getElementById('model-access-mode').value = accessMode;
   const select = document.getElementById('provider-select');
-  select.innerHTML = _providers.filter(p => !p.managed_router && !p.user_configurable_url).map(p =>
+  select.innerHTML = _providers.filter(p => !p.managed_router && !p.user_configurable_url &&
+    !(d.hosted && p.configurable_url)).map(p =>
     `<option value="${esc(p.name)}"${p.name === d.api_provider ? ' selected' : ''}>` +
     `${esc(p.label)}${p.key_set || p.user_credential_set || p.configurable_url ? '' : t('models.noKey')}</option>`).join('');
   if (accessMode !== 'single' && !select.value) select.selectedIndex = 0;
   const urlField = document.getElementById('server-url-field');
-  urlField.hidden = !current.configurable_url;
+  urlField.hidden = !current.configurable_url || !!d.hosted;
   if (current.managed_router) {
     const routes = current.configured_routes || [];
     document.getElementById('provider-help').innerHTML = routes.length

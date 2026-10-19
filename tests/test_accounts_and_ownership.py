@@ -219,6 +219,27 @@ def test_the_dashboard_counts_only_your_own_sessions(client):
     assert client.get("/api/dashboard").json()["sessions"]["total"] == 1
 
 
+def test_the_dashboard_scopes_usage_and_model_state_to_the_signed_in_account(client):
+    from tools.cost_tracker import CostTracker
+
+    _signup(client, "alice-dashboard@example.com")
+    alice_session = _new_session(client, "alice usage")
+    client.post("/api/settings", json={"use_api": True})
+    CostTracker().log("claude-sonnet-4-5", 1_000, 100, "test",
+                      session_id=alice_session)
+    alice = client.get("/api/dashboard").json()
+    assert alice["spend"]["today_usd"] > 0
+    assert alice["spend"]["use_api"] is True
+
+    client.post("/api/auth/logout")
+    _signup(client, "bob-dashboard@example.com")
+    _new_session(client, "bob usage")
+    client.post("/api/settings", json={"use_api": False})
+    bob = client.get("/api/dashboard").json()
+    assert bob["spend"]["today_usd"] == 0
+    assert bob["spend"]["use_api"] is False
+
+
 def test_signed_out_requests_cannot_read_anything(client):
     _signup(client, "alice@example.com")
     sid = _new_session(client, "alice's study")
@@ -285,6 +306,35 @@ def test_hosted_accounts_cannot_reconfigure_operator_or_local_model_settings(
     assert client.get("/api/local-server/models?url=http://127.0.0.1:1234/v1").status_code == 404
 
 
+def test_hosted_accounts_cannot_manage_server_tokens_or_database_backups(client, monkeypatch):
+    _signup(client, "hosted-operator-controls@example.com")
+    monkeypatch.setattr(config, "HOSTED", True)
+
+    assert client.get("/api/access/tokens").status_code == 404
+    assert client.post("/api/access/tokens", json={"name": "not-allowed"}).status_code == 404
+    assert client.get("/api/access/tokens/any-token").status_code == 404
+    assert client.delete("/api/access/tokens/any-token").status_code == 404
+    assert client.get("/api/backups").status_code == 404
+    assert client.post("/api/backups").status_code == 404
+
+
+def test_environment_reports_hosted_mode_and_the_configured_providers_model(client, monkeypatch):
+    from models import providers
+
+    _signup(client, "hosted-environment@example.com")
+    monkeypatch.setattr(config, "HOSTED", True)
+    monkeypatch.setattr(config, "API_PROVIDER", "gemini")
+
+    environment = client.get("/api/environment").json()
+    assert environment["hosted"] is True
+    assert environment["api_provider"] == "gemini"
+    assert environment["api_model"] == providers.PROVIDERS["gemini"].default_model
+
+    dashboard = client.get("/api/dashboard").json()
+    assert dashboard["hosted"] is True
+    assert dashboard["storage"]["visible"] is False
+
+
 def test_settings_html_separates_simple_keys_and_advanced_gateway(client):
     html = client.get("/").text
     assert 'id="key-input-gemini"' in html
@@ -293,6 +343,12 @@ def test_settings_html_separates_simple_keys_and_advanced_gateway(client):
     assert 'id="gateway-token-input"' in html
     assert 'id="model-access-mode"' in html
     assert 'id="local-model-panel"' in html
+    assert '[hidden] { display: none !important; }' in html
+    assert '@media (max-width: 900px)' in html
+    assert 'id="project-name" autocomplete="off"' in html
+    assert 'id="backup-panel"' in html
+    assert '!(d.hosted && p.configurable_url)' in html
+    assert 'urlField.hidden = !current.configurable_url || !!d.hosted' in html
     assert "value = provider.base_url" in html
     assert "gateway-token-input').value =" not in html
 

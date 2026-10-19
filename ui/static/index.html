@@ -312,6 +312,89 @@ input:focus, textarea:focus { border-color: var(--accent); }
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
 }
+
+/* Account console */
+.profile-wrap { position: relative; }
+.legacy-logout { display: none !important; }
+.profile-button {
+  width: 34px; height: 34px; border: 0; border-radius: 50%; cursor: pointer;
+  background: var(--accent); color: #fff; font: 700 13px/1 inherit;
+  display: grid; place-items: center;
+}
+.profile-menu {
+  position: absolute; right: 0; top: 42px; width: 190px; padding: 6px;
+  background: var(--bg-1); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 14px 36px rgba(20, 31, 46, .14); z-index: 500;
+}
+.profile-menu .profile-identity { padding: 9px 10px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.profile-menu .profile-identity strong, .profile-menu .profile-identity span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-menu .profile-identity span { color: var(--text-2); font-size: 11px; margin-top: 2px; }
+.profile-menu button { width: 100%; border: 0; background: transparent; color: var(--text-0); text-align: left; padding: 8px 10px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 12.5px; }
+.profile-menu button:hover { background: var(--accent-bg); color: var(--accent-2); }
+.account-shell { min-height: 100%; display: grid; grid-template-columns: 210px minmax(0, 1fr); background: var(--bg-0); }
+.account-sidebar { background: var(--bg-1); border-right: 1px solid var(--border); padding: 18px 12px; }
+.account-back { margin-bottom: 20px; }
+.account-nav-label { color: var(--text-2); font-size: 10px; font-weight: 700; letter-spacing: .9px; margin: 16px 10px 6px; }
+.account-nav-button { width: 100%; border: 0; background: transparent; color: var(--text-1); display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 7px; cursor: pointer; font: 600 12.5px/1.2 inherit; text-align: left; }
+.account-nav-button:hover { color: var(--text-0); background: var(--bg-2); }
+.account-nav-button.active { color: var(--accent-2); background: var(--accent-bg); }
+.account-main { min-width: 0; padding: 28px 32px 60px; overflow-y: auto; }
+.account-mobile-nav { display: none; margin-bottom: 16px; }
+.account-page { display: none; }
+.account-page.active { display: block; }
+.account-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.account-page-head h1 { margin: 0 0 5px; font-size: 24px; }
+.account-page-head p { margin: 0; color: var(--text-1); font-size: 13px; }
+.account-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.account-panel { background: var(--bg-1); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 18px; overflow: hidden; }
+.account-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.account-panel-head h2 { font-size: 15px; margin: 0 0 3px; }
+.account-panel-head p { color: var(--text-1); font-size: 12px; margin: 0; }
+.account-table-wrap { width: 100%; overflow-x: auto; }
+.account-table { width: 100%; border-collapse: collapse; min-width: 720px; }
+.account-table th { background: var(--bg-2); color: var(--text-2); font-size: 10.5px; letter-spacing: .25px; text-align: left; padding: 10px 12px; }
+.account-table td { padding: 11px 12px; border-top: 1px solid var(--border); font-size: 12.5px; vertical-align: middle; }
+.account-table tbody tr:first-child td { border-top: 0; }
+.provider-cell { display: flex; align-items: center; gap: 9px; font-weight: 650; white-space: nowrap; }
+.provider-logo { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 800; flex: 0 0 28px; }
+.provider-logo.gemini { background: linear-gradient(135deg, #4285f4, #34a853); }
+.provider-logo.groq { background: #111; }
+.provider-logo.openai { background: #202123; }
+.provider-logo.anthropic { background: #d4a574; color: #1f1710; }
+.provider-logo.freellmapi { background: linear-gradient(135deg, #18b981, #70d44b); }
+.status-pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 4px 8px; font-size: 10.5px; font-weight: 700; }
+.status-pill.active, .status-pill.verified { color: #087657; background: #dcf7ee; }
+.status-pill.untested { color: #7b5b12; background: #fff4d5; }
+.status-pill.disabled, .status-pill.failed { color: #9c3a45; background: #fde9ec; }
+.row-actions { position: relative; }
+.row-actions summary { list-style: none; cursor: pointer; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; font-size: 18px; }
+.row-actions summary::-webkit-details-marker { display: none; }
+.row-actions summary:hover { background: var(--bg-2); }
+.row-action-menu { position: absolute; right: 0; top: 31px; width: 150px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; padding: 5px; box-shadow: 0 12px 28px rgba(20,31,46,.14); z-index: 20; }
+.row-action-menu button { display: block; width: 100%; padding: 7px 8px; border: 0; background: transparent; text-align: left; border-radius: 5px; cursor: pointer; color: var(--text-0); font: inherit; font-size: 12px; }
+.row-action-menu button:hover { background: var(--accent-bg); }
+.row-action-menu button.danger { color: var(--red); }
+.account-empty { padding: 28px 18px; text-align: center; color: var(--text-1); font-size: 12.5px; }
+.account-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px; margin-bottom: 18px; }
+.account-summary { background: var(--bg-1); border: 1px solid var(--border); border-radius: 10px; padding: 15px; }
+.account-summary .label { color: var(--text-2); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .45px; }
+.account-summary .value { color: var(--text-0); font-size: 20px; font-weight: 750; margin-top: 6px; }
+.account-summary .meta { color: var(--text-1); font-size: 11.5px; margin-top: 4px; }
+.credential-dialog { width: min(520px, calc(100vw - 28px)); }
+.provider-picker { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin: 8px 0 14px; }
+.provider-choice { border: 1px solid var(--border); border-radius: 8px; padding: 11px; background: var(--bg-1); color: var(--text-0); cursor: pointer; display: flex; align-items: center; gap: 9px; text-align: left; font: inherit; }
+.provider-choice:hover, .provider-choice.selected { border-color: var(--accent); background: var(--accent-bg); }
+.provider-choice small { display: block; color: var(--text-2); margin-top: 2px; }
+
+@media (max-width: 900px) {
+  .account-shell { grid-template-columns: 1fr; }
+  .account-sidebar { display: none; }
+  .account-main { padding: 18px 16px 50px; }
+  .account-mobile-nav { display: block; width: 100%; }
+  .account-page-head { align-items: stretch; flex-direction: column; }
+  .account-actions .btn-primary, .account-actions .btn-secondary { flex: 1; justify-content: center; }
+  .profile-menu { position: fixed; right: 10px; top: 58px; }
+}
 #session-list {
   flex: 1;
   overflow-y: auto;
@@ -1587,13 +1670,13 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
       <button class="nav-tab active" id="tab-research" onclick="showView('research')" data-i18n="nav.research">Research</button>
       <button class="nav-tab" id="tab-dashboard" onclick="showView('dashboard')" data-i18n="nav.dashboard">Dashboard</button>
       <button class="nav-tab" id="tab-manage" onclick="showView('manage')" data-i18n="nav.manage">Manage</button>
-      <button class="nav-tab" id="tab-settings" onclick="showView('settings')" data-i18n="nav.settings">Settings</button>
+      <button class="nav-tab" id="tab-settings" onclick="openAccountConsole('api-keys')" data-i18n="nav.settings">Settings</button>
     </div>
     <div class="nav-spacer"></div>
     <div class="lang-switch" role="group" aria-label="Language">
       <button class="lang-btn" data-lang="en" onclick="setLang('en')">EN</button>
     </div>
-    <button class="btn-secondary btn-sm" id="btn-logout" onclick="logout()" data-i18n="nav.logout"
+    <button class="btn-secondary btn-sm legacy-logout" id="btn-logout" onclick="logout()" data-i18n="nav.logout"
             style="display:none;margin-right:8px">Sign out</button>
     <div id="api-toggle-wrap" title="Toggle model API usage for this session" style="display:flex;align-items:center;gap:8px;margin-right:8px;cursor:pointer" onclick="toggleApi()">
       <span id="api-toggle-label" style="font-size:11px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--text-2)">Model API</span>
@@ -1608,6 +1691,17 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
       </svg>
       <span data-i18n="app.newSession">New Session</span>
     </button>
+    <div class="profile-wrap">
+      <button class="profile-button" id="profile-button" type="button" aria-label="Open account menu"
+              aria-expanded="false" onclick="toggleProfileMenu()">U</button>
+      <div class="profile-menu" id="profile-menu" hidden>
+        <div class="profile-identity"><strong id="profile-menu-name">My account</strong><span id="profile-menu-email">—</span></div>
+        <button type="button" onclick="openAccountConsole('overview')">My Account</button>
+        <button type="button" onclick="openAccountConsole('api-keys')">API Keys</button>
+        <button type="button" onclick="openAccountConsole('billing')">Billing</button>
+        <button type="button" onclick="logout()">Sign out</button>
+      </div>
+    </div>
   </nav>
 
   <!-- Body -->
@@ -1967,7 +2061,85 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
     </div>
   </section>
 
-  <!-- Settings -->
+  <!-- Account Management Console -->
+  <section class="view" id="view-account" hidden style="padding:0">
+    <div class="account-shell">
+      <aside class="account-sidebar" aria-label="Account navigation">
+        <button class="btn-secondary btn-sm account-back" type="button" onclick="showView('research')">← Back to Research</button>
+        <div class="account-nav-label">ACCOUNT</div>
+        <button class="account-nav-button" data-account-page="overview" onclick="showAccountPage('overview')">◫ Overview</button>
+        <button class="account-nav-button" data-account-page="api-keys" onclick="showAccountPage('api-keys')">⌘ API Keys</button>
+        <button class="account-nav-button" data-account-page="usage" onclick="showAccountPage('usage')">◷ Usage</button>
+        <button class="account-nav-button" data-account-page="billing" onclick="showAccountPage('billing')">▣ Billing</button>
+        <div class="account-nav-label">PERSONAL</div>
+        <button class="account-nav-button" data-account-page="profile" onclick="showAccountPage('profile')">○ Profile</button>
+        <button class="account-nav-button" data-account-page="security" onclick="showAccountPage('security')">♢ Security</button>
+      </aside>
+      <main class="account-main">
+        <select class="account-mobile-nav" id="account-mobile-nav" aria-label="Account section"
+                onchange="showAccountPage(this.value)">
+          <option value="overview">Overview</option><option value="api-keys">API Keys</option>
+          <option value="usage">Usage</option><option value="billing">Billing</option>
+          <option value="profile">Profile</option><option value="security">Security</option>
+        </select>
+
+        <div class="account-page" id="account-page-overview">
+          <div class="account-page-head"><div><h1>Account overview</h1><p>Your plan, connections, usage, and account status.</p></div></div>
+          <div class="account-summary-grid" id="account-overview-cards"></div>
+          <div class="account-panel"><div class="account-panel-head"><div><h2>Connected providers</h2><p>Credentials available only to this account.</p></div><button class="btn-secondary btn-sm" onclick="showAccountPage('api-keys')">Manage</button></div><div id="account-overview-providers" class="account-empty">Loading…</div></div>
+        </div>
+
+        <div class="account-page" id="account-page-api-keys">
+          <div class="account-page-head">
+            <div><h1>AI Connections</h1><p>Connect your own AI providers or use FreeLLMAPI for advanced model routing.</p></div>
+            <div class="account-actions"><a class="btn-secondary" href="https://github.com/hncpyj/research-agent-lab" target="_blank" rel="noopener">API Guide</a><button class="btn-primary" onclick="openCredentialModal()">＋ Add provider</button></div>
+          </div>
+          <div class="account-panel">
+            <div class="account-panel-head"><div><h2>Direct connections</h2><p>Your own provider keys, encrypted and isolated to this account.</p></div></div>
+            <div class="account-table-wrap"><table class="account-table"><thead><tr><th>Provider</th><th>Key name</th><th>API key</th><th>Status</th><th>Last used</th><th></th></tr></thead><tbody id="direct-credential-rows"></tbody></table></div>
+            <div class="account-empty" id="direct-credential-empty" hidden>No direct API keys connected yet. <button class="btn-link" onclick="openCredentialModal()">Add a provider</button></div>
+          </div>
+          <div class="account-panel">
+            <div class="account-panel-head"><div><h2>Free use API Keys for light use</h2><p>Add your API keys to automatically find and use available free AI models.</p></div><button class="btn-secondary btn-sm" onclick="openCredentialModal()">Manage</button></div>
+            <div class="account-table-wrap"><table class="account-table"><thead><tr><th>Provider</th><th>Key name</th><th>Model / endpoint</th><th>API key</th><th>Status</th><th>Last used</th><th></th></tr></thead><tbody id="gateway-credential-rows"></tbody></table></div>
+            <div class="account-empty" id="gateway-credential-empty" hidden>Add Gemini or Groq for Simple Mode, or connect an advanced FreeLLMAPI gateway.</div>
+          </div>
+          <div class="account-panel">
+            <div class="account-panel-head"><div><h2>Automatic model selection</h2><p>Simple Mode uses only your saved Gemini and Groq credentials. Frozen research keeps its exact approved model.</p></div></div>
+            <div style="padding:16px 18px;display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+              <div class="field" style="margin:0"><label for="account-routing-policy">Routing preference</label><select id="account-routing-policy"><option value="simple:balanced">Balanced</option><option value="simple:gemini-first">Gemini first</option><option value="simple:groq-first">Groq first</option></select></div>
+              <button class="btn-secondary" onclick="saveAccountRouting()">Save routing</button><span class="hint" id="account-routing-result"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="account-page" id="account-page-usage">
+          <div class="account-page-head"><div><h1>Usage</h1><p>Real model requests, tokens, and estimated external-provider costs.</p></div><select id="usage-window" onchange="loadAccountUsage()"><option value="1">Today</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option></select></div>
+          <div class="account-summary-grid" id="account-usage-cards"></div>
+          <div class="account-panel"><div class="account-panel-head"><div><h2>Recent model usage</h2><p>Unknown provider costs remain unknown rather than being shown as free.</p></div></div><div class="account-table-wrap"><table class="account-table"><thead><tr><th>Time</th><th>Provider / model</th><th>Session</th><th>Tokens</th><th>Cost</th><th>Fallback</th></tr></thead><tbody id="account-usage-rows"></tbody></table></div><div class="account-empty" id="account-usage-empty" hidden>No usage recorded for this period.</div></div>
+        </div>
+
+        <div class="account-page" id="account-page-billing">
+          <div class="account-page-head"><div><h1>Billing</h1><p>ResearchAgentLab platform billing is separate from external provider costs.</p></div></div>
+          <div class="account-summary-grid" id="account-billing-cards"></div>
+          <div class="account-panel"><div class="account-panel-head"><div><h2>Billing history</h2><p>Invoices issued by ResearchAgentLab.</p></div></div><div class="account-empty" id="account-invoices">No invoices yet.</div></div>
+          <div class="account-panel"><div style="padding:16px 18px" class="hint" id="provider-cost-note"></div></div>
+        </div>
+
+        <div class="account-page" id="account-page-profile">
+          <div class="account-page-head"><div><h1>Profile</h1><p>Your ResearchAgentLab account identity.</p></div></div>
+          <div class="account-panel"><div style="padding:18px"><div class="kv"><div class="k">Email</div><div class="v" id="profile-email">—</div><div class="k">Verification</div><div class="v" id="profile-verification">—</div><div class="k">Account created</div><div class="v" id="profile-created">—</div></div></div></div>
+        </div>
+
+        <div class="account-page" id="account-page-security">
+          <div class="account-page-head"><div><h1>Security</h1><p>Change your password without exposing account credentials.</p></div></div>
+          <div class="account-panel"><div class="account-panel-head"><div><h2>Password</h2><p>Changing it signs out other existing sessions.</p></div></div><div style="padding:18px;max-width:520px"><div class="field"><label for="account-current-password">Current password</label><input id="account-current-password" type="password" autocomplete="current-password"></div><div class="field"><label for="account-new-password">New password</label><input id="account-new-password" type="password" autocomplete="new-password"></div><div class="field"><label for="account-confirm-password">Confirm new password</label><input id="account-confirm-password" type="password" autocomplete="new-password"></div><button class="btn-primary" onclick="changeConsolePassword()">Change password</button><span class="hint" id="account-password-console-result" style="margin-left:10px"></span></div></div>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- Legacy Settings (kept for local/operator compatibility) -->
   <section class="view" id="view-settings" hidden>
     <div class="view-head">
       <h1 data-i18n="settings.title">Settings</h1>
@@ -2148,6 +2320,29 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
       <dl class="kv" id="env-rows"></dl>
     </div>
   </section>
+</div>
+
+<!-- Provider credential modal -->
+<div class="modal-overlay" id="credential-modal" role="dialog" aria-modal="true" aria-labelledby="credential-modal-title">
+  <div class="modal credential-dialog">
+    <div class="modal-head"><h2 id="credential-modal-title">Add provider</h2><button class="modal-close" onclick="closeCredentialModal()" aria-label="Close">×</button></div>
+    <div id="credential-provider-picker">
+      <div class="provider-picker">
+        <button class="provider-choice" type="button" data-provider="gemini" onclick="chooseCredentialProvider('gemini')"><span class="provider-logo gemini">G</span><span>Google Gemini<small>Direct connection</small></span></button>
+        <button class="provider-choice" type="button" data-provider="groq" onclick="chooseCredentialProvider('groq')"><span class="provider-logo groq">groq</span><span>Groq<small>Direct connection</small></span></button>
+        <button class="provider-choice" type="button" data-provider="openai" onclick="chooseCredentialProvider('openai')"><span class="provider-logo openai">AI</span><span>OpenAI<small>Direct connection</small></span></button>
+        <button class="provider-choice" type="button" data-provider="anthropic" onclick="chooseCredentialProvider('anthropic')"><span class="provider-logo anthropic">A</span><span>Anthropic<small>Direct connection</small></span></button>
+        <button class="provider-choice" type="button" data-provider="freellmapi" onclick="chooseCredentialProvider('freellmapi')"><span class="provider-logo freellmapi">F</span><span>FreeLLMAPI<small>Advanced gateway</small></span></button>
+      </div>
+    </div>
+    <div id="credential-fields" hidden>
+      <div class="field"><label for="credential-label">Key name</label><input id="credential-label" autocomplete="off" maxlength="80" placeholder="e.g. Personal"></div>
+      <div class="field" id="credential-base-url-field" hidden><label for="credential-base-url">Gateway URL</label><input id="credential-base-url" type="url" autocomplete="url" placeholder="https://gateway.example/v1"></div>
+      <div class="field"><label for="credential-secret">API key or token</label><input id="credential-secret" type="password" autocomplete="new-password" spellcheck="false" placeholder="Stored encrypted and never shown again"></div>
+      <p class="hint" id="credential-provider-help"></p>
+    </div>
+    <div class="modal-foot"><button class="btn-secondary" onclick="closeCredentialModal()">Cancel</button><button class="btn-primary" id="credential-save" onclick="saveCredential()" disabled>Save credential</button></div>
+  </div>
 </div>
 
 <!-- New Session Modal -->
@@ -2901,6 +3096,10 @@ document.addEventListener('DOMContentLoaded', () => {
 let _locked = false;
 let _signupOpen = false;
 let _accountsExist = false;
+let _currentAccount = null;
+let _accountCredentials = [];
+let _credentialProvider = '';
+let _editingCredentialId = '';
 
 // One place catches "your token stopped working": every request in this page,
 // including the ones written before there was a login screen, goes through it.
@@ -2934,7 +3133,9 @@ async function startApp() {
     const account = await accountResponse.json();
     _signupOpen = !!account.signup_open;
     _accountsExist = !!account.accounts;
+    _currentAccount = account.user || null;
     document.getElementById('btn-logout').style.display = (_locked || account.user) ? '' : 'none';
+    updateProfileMenu();
     if (window.location.pathname === '/verify-email') { completeEmailVerification(); return; }
     if (window.location.pathname === '/reset-password') { showAccount('reset'); return; }
     if (window.location.pathname === '/forgot-password') { showAccount('forgot'); return; }
@@ -2952,6 +3153,10 @@ async function startApp() {
   loadProjects();
   loadSessions();
   loadApiSetting();
+  if (window.location.pathname.startsWith('/app/account/')) {
+    const section = window.location.pathname.split('/').filter(Boolean).pop() || 'overview';
+    openAccountConsole(section, false);
+  }
 }
 
 function showLogin() {
@@ -3152,6 +3357,7 @@ const VIEWS = {
     await loadApiKeys();
     if (!(window._settingsSnapshot || {}).hosted) loadLocalModels();
   }},
+  account:   {el: 'view-account', load: null},
 };
 
 function showView(name) {
@@ -3165,6 +3371,363 @@ function showView(name) {
   });
   const load = VIEWS[name] && VIEWS[name].load;
   if (load) load();
+  if (name === 'research' && window.location.pathname.startsWith('/app/account/')) {
+    history.pushState({}, '', '/app');
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Account console
+// ──────────────────────────────────────────────────────────────────────────────
+const ACCOUNT_PAGES = ['overview', 'api-keys', 'usage', 'billing', 'profile', 'security'];
+const PROVIDER_META = {
+  gemini: {name: 'Google Gemini', mark: 'G'},
+  groq: {name: 'Groq', mark: 'groq'},
+  openai: {name: 'OpenAI', mark: 'AI'},
+  anthropic: {name: 'Anthropic', mark: 'A'},
+  freellmapi: {name: 'FreeLLMAPI', mark: 'F'},
+};
+
+function updateProfileMenu() {
+  const user = _currentAccount || {};
+  const email = user.email || 'Local account';
+  const local = email.split('@')[0] || 'User';
+  const displayName = local.replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const initial = (displayName.trim()[0] || 'U').toUpperCase();
+  const button = document.getElementById('profile-button');
+  if (button) { button.textContent = initial; button.setAttribute('aria-label', `Account menu for ${email}`); }
+  const name = document.getElementById('profile-menu-name');
+  const mail = document.getElementById('profile-menu-email');
+  if (name) name.textContent = displayName || 'My account';
+  if (mail) mail.textContent = email;
+}
+
+function toggleProfileMenu(force) {
+  const menu = document.getElementById('profile-menu');
+  const button = document.getElementById('profile-button');
+  if (!menu) return;
+  const nextHidden = force === undefined ? !menu.hidden : !force;
+  menu.hidden = nextHidden;
+  if (button) button.setAttribute('aria-expanded', String(!nextHidden));
+}
+
+document.addEventListener('click', event => {
+  const wrap = document.querySelector('.profile-wrap');
+  if (wrap && !wrap.contains(event.target)) toggleProfileMenu(false);
+});
+
+function openAccountConsole(page = 'overview', push = true) {
+  toggleProfileMenu(false);
+  showView('account');
+  document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+  const settingsTab = document.getElementById('tab-settings');
+  if (settingsTab) settingsTab.classList.add('active');
+  showAccountPage(page, push);
+}
+
+function showAccountPage(page, push = true) {
+  const selected = ACCOUNT_PAGES.includes(page) ? page : 'overview';
+  document.querySelectorAll('.account-page').forEach(el =>
+    el.classList.toggle('active', el.id === `account-page-${selected}`));
+  document.querySelectorAll('.account-nav-button').forEach(el =>
+    el.classList.toggle('active', el.dataset.accountPage === selected));
+  const mobile = document.getElementById('account-mobile-nav');
+  if (mobile) mobile.value = selected;
+  const targetPath = `/app/account/${selected}`;
+  if (push && window.location.pathname !== targetPath) history.pushState({}, '', targetPath);
+  if (selected === 'overview') loadAccountOverview();
+  if (selected === 'api-keys') { loadAccountCredentials(); loadAccountRouting(); }
+  if (selected === 'usage') loadAccountUsage();
+  if (selected === 'billing') loadAccountBilling();
+  if (selected === 'profile') loadAccountProfile();
+}
+
+window.addEventListener('popstate', () => {
+  if (window.location.pathname.startsWith('/app/account/')) {
+    openAccountConsole(window.location.pathname.split('/').filter(Boolean).pop(), false);
+  } else {
+    showView('research');
+  }
+});
+
+function _providerMeta(provider) {
+  return PROVIDER_META[provider] || {name: provider || 'Provider', mark: '?'};
+}
+
+function _providerCell(provider) {
+  const meta = _providerMeta(provider);
+  return `<div class="provider-cell"><span class="provider-logo ${esc(provider)}">${esc(meta.mark)}</span>${esc(meta.name)}</div>`;
+}
+
+function _credentialStatus(item) {
+  if (!item.enabled) return {label: 'Disabled', css: 'disabled'};
+  const verification = item.verification_status || 'untested';
+  if (verification === 'verified') return {label: 'Verified', css: 'verified'};
+  if (verification === 'failed') return {label: 'Check failed', css: 'failed'};
+  return {label: 'Active', css: 'active'};
+}
+
+function _formatWhen(value) {
+  if (!value) return 'Never used';
+  return esc(String(value).slice(0, 16).replace('T', ' '));
+}
+
+function _credentialActions(item) {
+  const toggleLabel = item.enabled ? 'Disable' : 'Enable';
+  const test = item.provider === 'freellmapi'
+    ? `<button type="button" aria-label="Test ${esc(item.label)} connection" onclick="testCredential('${item.credential_id}')">Test connection</button>` : '';
+  const makeDefault = item.is_default ? ''
+    : `<button type="button" aria-label="Make ${esc(item.label)} default" onclick="makeDefaultCredential('${item.credential_id}')">Make default</button>`;
+  return `<details class="row-actions"><summary aria-label="Actions for ${esc(item.label)}">⋮</summary><div class="row-action-menu">
+    <button type="button" aria-label="Edit or replace ${esc(item.label)}" onclick="openCredentialModal('${esc(item.provider)}','${item.credential_id}')">Edit / replace</button>
+    ${makeDefault}<button type="button" aria-label="${toggleLabel} ${esc(item.label)}" onclick="toggleCredential('${item.credential_id}',${!item.enabled})">${toggleLabel}</button>
+    ${test}<button type="button" class="danger" aria-label="Delete ${esc(item.label)}" onclick="deleteCredential('${item.credential_id}')">Delete</button>
+  </div></details>`;
+}
+
+async function loadAccountCredentials() {
+  try {
+    const r = await api('/api/account/credentials');
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Could not load credentials.');
+    _accountCredentials = d.credentials || [];
+    const direct = _accountCredentials.filter(item => item.provider !== 'freellmapi');
+    // This section is a routing view, not a second secret store. Gemini and
+    // Groq keys shown above are also the credentials Simple Mode can route
+    // across; an optional FreeLLMAPI gateway remains an advanced route.
+    const gateways = _accountCredentials.filter(item =>
+      ['gemini', 'groq', 'freellmapi'].includes(item.provider));
+    const directRows = document.getElementById('direct-credential-rows');
+    const gatewayRows = document.getElementById('gateway-credential-rows');
+    directRows.innerHTML = direct.map(item => {
+      const status = _credentialStatus(item);
+      return `<tr><td>${_providerCell(item.provider)}</td><td>${esc(item.label)}${item.is_default ? ' <span class="hint">Default</span>' : ''}</td><td class="mono">${esc(item.hint)}</td><td><span class="status-pill ${status.css}">${status.label}</span></td><td>${_formatWhen(item.last_used_at)}</td><td>${_credentialActions(item)}</td></tr>`;
+    }).join('');
+    gatewayRows.innerHTML = gateways.map(item => {
+      const status = _credentialStatus(item);
+      const route = item.provider === 'freellmapi' ? (item.base_url || '—') : 'Automatic free model';
+      return `<tr><td>${_providerCell(item.provider)}</td><td>${esc(item.label)}${item.is_default ? ' <span class="hint">Default</span>' : ''}</td><td class="mono">${esc(route)}</td><td class="mono">${esc(item.hint)}</td><td><span class="status-pill ${status.css}">${status.label}</span></td><td>${_formatWhen(item.last_used_at)}</td><td>${_credentialActions(item)}</td></tr>`;
+    }).join('');
+    document.getElementById('direct-credential-empty').hidden = direct.length > 0;
+    document.getElementById('gateway-credential-empty').hidden = gateways.length > 0;
+    directRows.closest('.account-table-wrap').hidden = direct.length === 0;
+    gatewayRows.closest('.account-table-wrap').hidden = gateways.length === 0;
+  } catch(e) {
+    toast(e.message || 'Could not load credentials.', 'error');
+  }
+}
+
+function openCredentialModal(provider = '', credentialId = '') {
+  const modal = document.getElementById('credential-modal');
+  _editingCredentialId = credentialId || '';
+  _credentialProvider = '';
+  document.getElementById('credential-label').value = '';
+  document.getElementById('credential-secret').value = '';
+  document.getElementById('credential-base-url').value = '';
+  document.getElementById('credential-provider-picker').hidden = !!provider;
+  document.getElementById('credential-fields').hidden = true;
+  document.getElementById('credential-save').disabled = true;
+  document.getElementById('credential-modal-title').textContent = credentialId ? 'Edit credential' : 'Add provider';
+  modal.classList.add('open');
+  if (provider) chooseCredentialProvider(provider);
+  if (credentialId) {
+    const item = _accountCredentials.find(row => row.credential_id === credentialId);
+    if (!item) { closeCredentialModal(); return; }
+    chooseCredentialProvider(item.provider);
+    document.getElementById('credential-label').value = item.label || 'Default';
+    document.getElementById('credential-base-url').value = item.base_url || '';
+    document.getElementById('credential-secret').placeholder = 'Leave blank to keep the current secret';
+    document.getElementById('credential-save').disabled = false;
+  } else {
+    document.getElementById('credential-secret').placeholder = 'Stored encrypted and never shown again';
+  }
+}
+
+function closeCredentialModal() {
+  document.getElementById('credential-modal').classList.remove('open');
+  _credentialProvider = '';
+  _editingCredentialId = '';
+}
+
+function chooseCredentialProvider(provider) {
+  if (!PROVIDER_META[provider]) return;
+  _credentialProvider = provider;
+  document.querySelectorAll('.provider-choice').forEach(el =>
+    el.classList.toggle('selected', el.dataset.provider === provider));
+  document.getElementById('credential-fields').hidden = false;
+  document.getElementById('credential-base-url-field').hidden = provider !== 'freellmapi';
+  const help = provider === 'freellmapi'
+    ? 'Connect a single-user FreeLLMAPI gateway you control.'
+    : `Connect directly to ${_providerMeta(provider).name}.`;
+  document.getElementById('credential-provider-help').textContent = help;
+  if (!document.getElementById('credential-label').value) document.getElementById('credential-label').value = 'Default';
+  document.getElementById('credential-save').disabled = false;
+  setTimeout(() => document.getElementById('credential-label').focus(), 30);
+}
+
+async function _responseDetail(response) {
+  try { const d = await response.json(); return d.detail || d.message || ''; }
+  catch(e) { return ''; }
+}
+
+async function saveCredential() {
+  const label = document.getElementById('credential-label').value.trim() || 'Default';
+  const key = document.getElementById('credential-secret').value.trim();
+  const baseUrl = document.getElementById('credential-base-url').value.trim();
+  if (!_credentialProvider) { toast('Choose a provider.', 'error'); return; }
+  if (!_editingCredentialId && !key) { toast('Enter the API key or token.', 'error'); return; }
+  if (_credentialProvider === 'freellmapi' && !baseUrl) { toast('Enter the gateway URL.', 'error'); return; }
+  const save = document.getElementById('credential-save');
+  save.disabled = true;
+  try {
+    if (_editingCredentialId) {
+      let r = await api(`/api/account/credentials/${_editingCredentialId}`, {
+        method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({label})});
+      if (!r.ok) throw new Error(await _responseDetail(r) || 'Could not update the credential.');
+      if (key || (_credentialProvider === 'freellmapi' && baseUrl)) {
+        if (!key) throw new Error('Enter the token again when changing a gateway URL.');
+        r = await api(`/api/account/credentials/${_editingCredentialId}/secret`, {
+          method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key, base_url: baseUrl})});
+        if (!r.ok) throw new Error(await _responseDetail(r) || 'Could not replace the secret.');
+      }
+    } else {
+      const r = await api('/api/account/credentials', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({provider: _credentialProvider, label, key, base_url: baseUrl})});
+      if (!r.ok) throw new Error(await _responseDetail(r) || 'Could not save the credential.');
+    }
+    closeCredentialModal();
+    toast('Credential saved. The secret will not be shown again.', 'success');
+    await loadAccountCredentials();
+  } catch(e) {
+    toast(e.message || 'Could not save the credential.', 'error');
+  } finally { save.disabled = false; }
+}
+
+async function _patchCredential(credentialId, payload, successMessage) {
+  const r = await api(`/api/account/credentials/${credentialId}`, {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+  if (!r.ok) { toast(await _responseDetail(r) || 'Could not update the credential.', 'error'); return; }
+  toast(successMessage, 'success');
+  await loadAccountCredentials();
+}
+
+function toggleCredential(credentialId, enabled) {
+  return _patchCredential(credentialId, {enabled}, enabled ? 'Credential enabled.' : 'Credential disabled.');
+}
+
+function makeDefaultCredential(credentialId) {
+  return _patchCredential(credentialId, {make_default: true}, 'Default credential updated.');
+}
+
+async function deleteCredential(credentialId) {
+  const item = _accountCredentials.find(row => row.credential_id === credentialId);
+  if (!item || !confirm(`Delete ${item.label}? This cannot be undone.`)) return;
+  const r = await api(`/api/account/credentials/${credentialId}`, {method: 'DELETE'});
+  if (!r.ok) { toast(await _responseDetail(r) || 'Could not delete the credential.', 'error'); return; }
+  toast('Credential deleted.', 'success');
+  await loadAccountCredentials();
+}
+
+async function testCredential(credentialId) {
+  const r = await api(`/api/account/credentials/${credentialId}/test`, {method: 'POST'});
+  const detail = await _responseDetail(r);
+  if (!r.ok) { toast(detail || 'Connection test failed.', 'error'); await loadAccountCredentials(); return; }
+  toast('FreeLLMAPI connection verified.', 'success');
+  await loadAccountCredentials();
+}
+
+function _summaryCard(label, value, meta = '') {
+  return `<div class="account-summary"><div class="label">${esc(label)}</div><div class="value">${esc(String(value))}</div><div class="meta">${esc(meta)}</div></div>`;
+}
+
+async function loadAccountOverview() {
+  try {
+    const r = await api('/api/account/overview'); const d = await r.json();
+    const plan = d.plan || {};
+    document.getElementById('account-overview-cards').innerHTML = [
+      _summaryCard('Plan', plan.name || d.account.plan || 'Free', 'ResearchAgentLab plan'),
+      _summaryCard('AI credentials', d.credential_count || 0, `${(d.connected_providers || []).length} provider(s)`),
+      _summaryCard('Calls today', (d.usage_today || {}).calls || 0, `${(d.usage_today || {}).input_tokens || 0} input tokens`),
+      _summaryCard('Account', d.status || 'active', d.account.email || ''),
+    ].join('');
+    const providers = d.connected_providers || [];
+    document.getElementById('account-overview-providers').innerHTML = providers.length
+      ? providers.map(p => `<div class="row-item">${_providerCell(p)}<span class="status-pill active">Connected</span></div>`).join('')
+      : 'No provider credentials connected yet.';
+  } catch(e) { toast('Could not load account overview.', 'error'); }
+}
+
+async function loadAccountRouting() {
+  try {
+    const d = await (await api('/api/settings')).json();
+    const selected = document.getElementById('account-routing-policy');
+    const value = d.api_provider === 'auto_byok' ? d.api_model : 'simple:balanced';
+    selected.value = ['simple:balanced','simple:gemini-first','simple:groq-first'].includes(value) ? value : 'simple:balanced';
+  } catch(e) {}
+}
+
+async function saveAccountRouting() {
+  const result = document.getElementById('account-routing-result');
+  result.textContent = 'Saving…';
+  const model = document.getElementById('account-routing-policy').value;
+  const r = await api('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({use_api: true, api_provider: 'auto_byok', api_model: model})});
+  if (!r.ok) { result.textContent = await _responseDetail(r) || 'Could not save.'; return; }
+  result.textContent = 'Saved for this account.';
+}
+
+async function loadAccountUsage() {
+  try {
+    const days = document.getElementById('usage-window').value;
+    const d = await (await api(`/api/account/usage?days=${encodeURIComponent(days)}`)).json();
+    const s = d.summary || {};
+    document.getElementById('account-usage-cards').innerHTML = [
+      _summaryCard('Requests', s.calls || 0, `Last ${days} day(s)`),
+      _summaryCard('Input tokens', (s.input_tokens || 0).toLocaleString(), 'Recorded by provider responses'),
+      _summaryCard('Output tokens', (s.output_tokens || 0).toLocaleString(), 'Recorded by provider responses'),
+      _summaryCard('Estimated cost', `$${Number(s.estimated_cost_usd || 0).toFixed(4)}`, `${s.unknown_cost_calls || 0} unknown-cost call(s)`),
+    ].join('');
+    const rows = d.records || [];
+    document.getElementById('account-usage-rows').innerHTML = rows.map(row => `<tr>
+      <td>${_formatWhen(row.timestamp)}</td><td>${esc(row.actual_provider || row.provider || '—')}<div class="hint">${esc(row.actual_model || row.selected_model || '—')}</div></td>
+      <td class="mono">${esc((row.session_id || '').slice(0, 8))}</td><td>${Number(row.input_tokens || 0).toLocaleString()} / ${Number(row.output_tokens || 0).toLocaleString()}</td>
+      <td>${row.cost_known ? '$' + Number(row.cost_usd || 0).toFixed(4) : 'Unknown'}</td><td>${row.fallback_attempts || 0}${row.retry_count ? ` + ${row.retry_count} retry` : ''}</td></tr>`).join('');
+    document.getElementById('account-usage-empty').hidden = rows.length > 0;
+    document.getElementById('account-usage-rows').closest('.account-table-wrap').hidden = rows.length === 0;
+  } catch(e) { toast('Could not load usage.', 'error'); }
+}
+
+async function loadAccountBilling() {
+  try {
+    const d = await (await api('/api/account/billing')).json();
+    const plan = d.plan || {}, charges = d.platform_charges || {}, subscription = d.subscription || {};
+    document.getElementById('account-billing-cards').innerHTML = [
+      _summaryCard('Plan', plan.name || 'Free', subscription.description || ''),
+      _summaryCard('Platform charges', `${charges.currency || 'GBP'} ${Number(charges.amount || 0).toFixed(2)}`, 'ResearchAgentLab charges only'),
+      _summaryCard('Payment method', (d.payment_method || {}).status || 'not required', (d.payment_method || {}).required ? 'Required' : 'Not required'),
+    ].join('');
+    const invoices = d.invoices || [];
+    document.getElementById('account-invoices').textContent = invoices.length ? `${invoices.length} invoice(s)` : 'No invoices yet.';
+    document.getElementById('provider-cost-note').textContent = d.provider_cost_note || '';
+  } catch(e) { toast('Could not load billing.', 'error'); }
+}
+
+function loadAccountProfile() {
+  const user = _currentAccount || {};
+  document.getElementById('profile-email').textContent = user.email || 'Local account';
+  document.getElementById('profile-verification').textContent = user.email_verified === false ? 'Not verified' : 'Verified';
+  document.getElementById('profile-created').textContent = user.created_at ? user.created_at.slice(0, 16).replace('T', ' ') : '—';
+}
+
+async function changeConsolePassword() {
+  const current = document.getElementById('account-current-password');
+  const next = document.getElementById('account-new-password');
+  const confirmField = document.getElementById('account-confirm-password');
+  const result = document.getElementById('account-password-console-result');
+  result.textContent = '';
+  if (next.value !== confirmField.value) { result.textContent = 'New passwords do not match.'; return; }
+  const r = await api('/api/auth/password/change', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({current_password: current.value, new_password: next.value})});
+  if (!r.ok) { result.textContent = await _responseDetail(r) || 'Password change failed.'; return; }
+  current.value = ''; next.value = ''; confirmField.value = '';
+  result.textContent = 'Password changed.';
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

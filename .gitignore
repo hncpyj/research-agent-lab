@@ -30,6 +30,7 @@ data/reports/
 data/datasets/
 data/removed/
 data/ui_settings.json
+data/api_key_secret
 
 # Generated experiment code and runtime artifacts
 experiments/

@@ -76,9 +76,10 @@ def test_a_key_is_no_use_to_another_account(store):
 
     api_keys.store("u1", "anthropic", REAL_KEY)
     conn = sqlite3.connect(store / "t.db")
-    secret = conn.execute("SELECT secret FROM user_api_keys WHERE user_id = 'u1'").fetchone()[0]
-    conn.execute("INSERT INTO user_api_keys (user_id, provider, secret, hint, created_at, updated_at) "
-                 "VALUES ('u2', 'anthropic', ?, 'x', 'now', 'now')", (secret,))
+    secret = conn.execute("SELECT secret FROM user_api_credentials WHERE user_id = 'u1'").fetchone()[0]
+    conn.execute("INSERT INTO user_api_credentials "
+                 "(credential_id, user_id, provider, label, secret, hint, created_at, updated_at) "
+                 "VALUES ('copied', 'u2', 'anthropic', 'Copied', ?, 'x', 'now', 'now')", (secret,))
     conn.commit()
     conn.close()
 
@@ -91,8 +92,8 @@ def test_the_same_key_stored_for_another_provider_does_not_open_this_one(store):
 
     api_keys.store("u1", "openai", REAL_KEY)
     conn = sqlite3.connect(store / "t.db")
-    secret = conn.execute("SELECT secret FROM user_api_keys WHERE provider = 'openai'").fetchone()[0]
-    conn.execute("UPDATE user_api_keys SET provider = 'anthropic' WHERE user_id = 'u1'", ())
+    secret = conn.execute("SELECT secret FROM user_api_credentials WHERE provider = 'openai'").fetchone()[0]
+    conn.execute("UPDATE user_api_credentials SET provider = 'anthropic' WHERE user_id = 'u1'", ())
     conn.commit(); conn.close()
     assert api_keys.get("u1", "anthropic") == ""
     assert secret                                            # the row is there, it just will not open
@@ -103,7 +104,7 @@ def test_a_damaged_row_is_treated_as_absent_not_as_a_crash(store):
 
     api_keys.store("u1", "anthropic", REAL_KEY)
     conn = sqlite3.connect(store / "t.db")
-    conn.execute("UPDATE user_api_keys SET secret = 'not-really-encrypted'")
+    conn.execute("UPDATE user_api_credentials SET secret = 'not-really-encrypted'")
     conn.commit(); conn.close()
     assert api_keys.get("u1", "anthropic") == ""
 
@@ -114,7 +115,7 @@ def test_the_listing_shows_a_hint_and_never_the_key(store):
     api_keys.store("u1", "anthropic", REAL_KEY)
     listed = api_keys.list_keys("u1")
     assert [k.provider for k in listed] == ["anthropic"]
-    assert listed[0].hint == "test-a…cret"
+    assert listed[0].hint == "••••cret"
     assert REAL_KEY not in str([k.as_dict() for k in listed])
 
 
@@ -208,7 +209,7 @@ def test_the_api_never_hands_back_a_key(client):
     listed = client.get("/api/keys")
     assert REAL_KEY not in listed.text
     anthropic = [p for p in listed.json()["providers"] if p["provider"] == "anthropic"][0]
-    assert anthropic["stored"]["hint"] == "test-a…cret"
+    assert anthropic["stored"]["hint"] == "••••cret"
     assert anthropic["usable"] is True
 
 
@@ -237,7 +238,7 @@ def test_freellmapi_gateway_is_saved_per_user_without_returning_its_token(client
     gateway = next(p for p in saved.json()["providers"]
                    if p["provider"] == "freellmapi")
     assert gateway["base_url"] == "http://localhost:3001/v1"
-    assert gateway["stored"]["hint"] == "freell…cret"
+    assert gateway["stored"]["hint"] == "••••cret"
 
 
 def test_hosted_freellmapi_gateway_rejects_http_and_private_addresses(
@@ -271,3 +272,127 @@ def test_signed_out_nobody_can_read_the_keys(client):
     _verified_signup(client, "owner@example.com")
     client.post("/api/auth/logout")
     assert client.get("/api/keys").status_code == 401
+
+
+def test_multiple_credentials_for_one_provider_have_one_selected_default(store):
+    first = api_keys.add_credential(
+        "u1", "gemini", "gemini-first-key-not-a-secret", label="Personal")
+    second = api_keys.add_credential(
+        "u1", "gemini", "gemini-second-key-not-a-secret", label="Research")
+
+    listed = api_keys.list_keys("u1")
+    assert [(item.label, item.is_default) for item in listed] == [
+        ("Personal", True), ("Research", False)]
+    assert api_keys.get("u1", "gemini") == "gemini-first-key-not-a-secret"
+
+    api_keys.update_credential("u1", second.credential_id, make_default=True)
+    assert api_keys.get("u1", "gemini") == "gemini-second-key-not-a-secret"
+    assert sum(item.is_default for item in api_keys.list_keys("u1")) == 1
+    assert first.credential_id != second.credential_id
+
+
+def test_removing_the_default_selects_the_next_enabled_credential(store):
+    first = api_keys.add_credential(
+        "u1", "groq", "groq-first-key-not-a-secret", label="First")
+    second = api_keys.add_credential(
+        "u1", "groq", "groq-second-key-not-a-secret", label="Second")
+    assert api_keys.remove_credential("u1", first.credential_id) is True
+    remaining = api_keys.credential("u1", second.credential_id)
+    assert remaining is not None and remaining.is_default is True
+    assert api_keys.get("u1", "groq") == "groq-second-key-not-a-secret"
+
+
+def test_legacy_single_key_rows_are_migrated_additively_without_reencrypting(store):
+    import sqlite3
+
+    sealed = api_keys._encrypt("u1", "anthropic", REAL_KEY)
+    conn = sqlite3.connect(store / "t.db")
+    conn.execute(
+        "CREATE TABLE user_api_keys (user_id TEXT NOT NULL, provider TEXT NOT NULL, "
+        "secret TEXT NOT NULL, hint TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, "
+        "updated_at TEXT NOT NULL, last_used_at TEXT NOT NULL DEFAULT '', "
+        "PRIMARY KEY (user_id, provider))")
+    conn.execute("INSERT INTO user_api_keys VALUES (?, ?, ?, ?, ?, ?, ?)",
+                 ("u1", "anthropic", sealed, "••••cret", "before", "before", ""))
+    conn.commit(); conn.close()
+
+    migrated = api_keys.list_keys("u1")
+    assert len(migrated) == 1
+    assert migrated[0].label == "Default" and migrated[0].is_default is True
+    assert api_keys.get("u1", "anthropic") == REAL_KEY
+    conn = sqlite3.connect(store / "t.db")
+    assert conn.execute("SELECT COUNT(*) FROM user_api_keys").fetchone()[0] == 1
+    conn.close()  # the rollback-compatible legacy row remains untouched
+
+
+def test_account_credential_crud_never_returns_secrets_and_is_user_isolated(client):
+    _verified_signup(client, "owner@example.com")
+    secret = "gemini-owner-key-not-a-secret"
+    created = client.post("/api/account/credentials", json={
+        "provider": "gemini", "label": "Research", "key": secret,
+    })
+    assert created.status_code == 200 and secret not in created.text
+    credential_id = created.json()["credential"]["credential_id"]
+
+    listed = client.get("/api/account/credentials")
+    assert listed.status_code == 200 and secret not in listed.text
+    assert listed.json()["credentials"][0]["label"] == "Research"
+    renamed = client.patch(f"/api/account/credentials/{credential_id}",
+                           json={"label": "Primary", "enabled": True})
+    assert renamed.status_code == 200
+    replaced = client.put(f"/api/account/credentials/{credential_id}/secret", json={
+        "key": "gemini-replacement-not-a-secret",
+    })
+    assert replaced.status_code == 200 and "replacement" not in replaced.text
+
+    client.post("/api/auth/logout")
+    _verified_signup(client, "member@example.com")
+    assert client.patch(f"/api/account/credentials/{credential_id}",
+                        json={"label": "Stolen"}).status_code == 404
+    assert client.delete(f"/api/account/credentials/{credential_id}").status_code == 404
+    assert client.get("/api/account/credentials").json()["credentials"] == []
+
+
+def test_account_console_summary_and_billing_are_real_account_scoped_data(client):
+    _verified_signup(client, "owner@example.com")
+    client.post("/api/account/credentials", json={
+        "provider": "groq", "label": "Default",
+        "key": "groq-owner-key-not-a-secret",
+    })
+    overview = client.get("/api/account/overview")
+    assert overview.status_code == 200
+    assert overview.json()["credential_count"] == 1
+    assert overview.json()["connected_providers"] == ["groq"]
+    billing = client.get("/api/account/billing")
+    assert billing.status_code == 200
+    assert billing.json()["platform_charges"] == {"currency": "GBP", "amount": 0.0}
+    assert billing.json()["invoices"] == []
+
+
+def test_freellmapi_credential_test_uses_its_own_gateway_and_records_verification(
+    client, monkeypatch
+):
+    from models import providers
+
+    token = "freellmapi-browser-token-not-a-secret"
+    created = client.post("/api/account/credentials", json={
+        "provider": "freellmapi", "label": "Private gateway", "key": token,
+        "base_url": "http://localhost:3001",
+    })
+    credential_id = created.json()["credential"]["credential_id"]
+    observed = {}
+
+    def _models(actual_token, actual_url):
+        observed.update(token=actual_token, url=actual_url)
+        return ["gemini/free", "groq/free"]
+
+    monkeypatch.setattr(providers, "list_gateway_models", _models)
+    checked = client.post(f"/api/account/credentials/{credential_id}/test")
+    assert checked.status_code == 200
+    assert checked.json()["status"] == "verified"
+    assert observed == {"token": token, "url": "http://localhost:3001/v1"}
+    assert token not in checked.text
+    stored = api_keys.credential(api_keys.LOCAL_USER, credential_id)
+    assert stored is not None
+    assert stored.verification_status == "verified"
+    assert stored.last_used_at

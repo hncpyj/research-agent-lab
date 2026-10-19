@@ -194,6 +194,24 @@ class ApiKeyRequest(BaseModel):
     base_url: str = ""
 
 
+class CredentialCreateRequest(BaseModel):
+    provider: str
+    label: str = "Default"
+    key: str
+    base_url: str = ""
+
+
+class CredentialUpdateRequest(BaseModel):
+    label: str | None = None
+    enabled: bool | None = None
+    make_default: bool = False
+
+
+class CredentialSecretRequest(BaseModel):
+    key: str
+    base_url: str = ""
+
+
 class ProjectRequest(BaseModel):
     name: str = ""
     description: str | None = None
@@ -573,6 +591,57 @@ async def usage(request: Request):
     }
 
 
+@app.get("/api/account/overview")
+async def account_overview(request: Request):
+    from memory import api_keys, plans
+    from tools.cost_tracker import CostTracker
+
+    user = _require_user(request)
+    user_id = user.user_id if user else api_keys.LOCAL_USER
+    credentials = api_keys.list_keys(user_id)
+    connected = sorted({item.provider for item in credentials if item.enabled})
+    usage_today = CostTracker().today_usage_details(user_id)
+    plan = plans.plan_for(user)
+    return {
+        "account": user.as_dict() if user else {"email": "Local account", "plan": "local"},
+        "plan": plan.as_dict(),
+        "status": "active",
+        "connected_providers": connected,
+        "credential_count": len(credentials),
+        "usage_today": usage_today,
+        "billing": {"platform_charges_gbp": 0.0, "subscription": "none",
+                    "payment_method_required": False, "invoice_count": 0},
+    }
+
+
+@app.get("/api/account/usage")
+async def account_usage(request: Request, days: int = 30, limit: int = 50, offset: int = 0):
+    from tools.cost_tracker import CostTracker
+
+    user = _require_user(request)
+    return CostTracker().user_usage_window(
+        user.user_id if user else "", days=days, limit=limit, offset=offset)
+
+
+@app.get("/api/account/billing")
+async def account_billing(request: Request):
+    from memory import plans
+
+    user = _require_user(request)
+    plan = plans.plan_for(user)
+    return {
+        "plan": plan.as_dict(),
+        "subscription": {"status": "none", "description": "No paid subscription"},
+        "platform_charges": {"currency": "GBP", "amount": 0.0},
+        "payment_method": {"required": False, "status": "not_required"},
+        "invoices": [],
+        "provider_cost_note": (
+            "External AI provider costs are billed by those providers and are not "
+            "ResearchAgentLab charges."
+        ),
+    }
+
+
 def _authorise_project(project_id: str, request: Request):
     """A project belongs to whoever made it, like the sessions inside it."""
     from memory import projects
@@ -695,6 +764,107 @@ async def list_api_keys(request: Request):
 
     user = _require_user(request)
     return api_keys.describe(user.user_id if user else api_keys.LOCAL_USER)
+
+
+@app.get("/api/account/credentials")
+async def account_credentials(request: Request):
+    """Connected credentials for this account; never their decrypted secrets."""
+    from memory import api_keys
+
+    user = _require_user(request)
+    user_id = user.user_id if user else api_keys.LOCAL_USER
+    described = api_keys.describe(user_id)
+    return {"credentials": described["credentials"],
+            "server_key_allowed": described["server_key_allowed"]}
+
+
+@app.post("/api/account/credentials")
+async def create_account_credential(req: CredentialCreateRequest, request: Request):
+    from memory import api_keys
+
+    user = _require_user(request)
+    user_id = user.user_id if user else api_keys.LOCAL_USER
+    try:
+        saved = api_keys.add_credential(
+            user_id, req.provider.strip().lower(), req.key,
+            label=req.label, base_url=req.base_url)
+    except (api_keys.ApiKeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"credential": saved.as_dict()}
+
+
+@app.patch("/api/account/credentials/{credential_id}")
+async def update_account_credential(credential_id: str, req: CredentialUpdateRequest,
+                                    request: Request):
+    from memory import api_keys
+
+    user = _require_user(request)
+    user_id = user.user_id if user else api_keys.LOCAL_USER
+    try:
+        saved = api_keys.update_credential(
+            user_id, credential_id, label=req.label, enabled=req.enabled,
+            make_default=req.make_default)
+    except api_keys.ApiKeyError as exc:
+        status = 404 if "not found" in str(exc).lower() else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return {"credential": saved.as_dict()}
+
+
+@app.put("/api/account/credentials/{credential_id}/secret")
+async def replace_account_credential(credential_id: str, req: CredentialSecretRequest,
+                                     request: Request):
+    from memory import api_keys
+
+    user = _require_user(request)
+    user_id = user.user_id if user else api_keys.LOCAL_USER
+    try:
+        saved = api_keys.replace_credential(
+            user_id, credential_id, req.key, base_url=req.base_url)
+    except api_keys.ApiKeyError as exc:
+        status = 404 if "not found" in str(exc).lower() else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return {"credential": saved.as_dict()}
+
+
+@app.delete("/api/account/credentials/{credential_id}")
+async def delete_account_credential(credential_id: str, request: Request):
+    from memory import api_keys
+
+    user = _require_user(request)
+    user_id = user.user_id if user else api_keys.LOCAL_USER
+    if not api_keys.remove_credential(user_id, credential_id):
+        raise HTTPException(status_code=404, detail="Credential not found.")
+    return {"status": "deleted", "credential_id": credential_id}
+
+
+@app.post("/api/account/credentials/{credential_id}/test")
+async def test_account_credential(credential_id: str, request: Request):
+    """Bounded FreeLLMAPI contract check; direct keys remain explicitly untested."""
+    from memory import api_keys
+
+    user = _require_user(request)
+    user_id = user.user_id if user else api_keys.LOCAL_USER
+    saved = api_keys.credential(user_id, credential_id)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Credential not found.")
+    if saved.provider != "freellmapi":
+        return {"status": "untested", "detail":
+                "Direct provider keys are validated on their first bounded inference request."}
+    gateway = api_keys.gateway_for_credential(user_id, credential_id)
+    if gateway is None:
+        raise HTTPException(status_code=400, detail="The gateway credential cannot be read.")
+    try:
+        from models import providers
+        models = providers.list_gateway_models(gateway.token, gateway.base_url)
+    except Exception as exc:
+        api_keys.set_verification_status(user_id, credential_id, "failed")
+        logger.warning("FreeLLMAPI credential test failed (%s).", type(exc).__name__)
+        raise HTTPException(status_code=502,
+                            detail="The gateway could not be reached or rejected its token.") from exc
+    api_keys.set_verification_status(user_id, credential_id, "verified")
+    api_keys.mark_used(user_id, "freellmapi", credential_id=credential_id)
+    return {"status": "verified", "models": models[:100],
+            "tested_contract": "FreeLLMAPI v0.13.4"}
 
 
 @app.put("/api/keys/{provider}")

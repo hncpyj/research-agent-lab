@@ -355,6 +355,15 @@ def test_settings_html_separates_simple_keys_and_advanced_gateway(client):
     assert 'aria-label="Filter sessions by project"' in html
     assert "value = provider.base_url" in html
     assert "gateway-token-input').value =" not in html
+    assert 'id="profile-button"' in html
+    assert 'id="view-account"' in html
+    assert 'id="account-page-api-keys"' in html
+    assert 'id="direct-credential-rows"' in html
+    assert 'id="gateway-credential-rows"' in html
+    assert 'Add your API keys to automatically find and use available free AI models.' in html
+    assert "function openAccountConsole" in html
+    assert "function saveCredential" in html
+    assert "function deleteCredential" in html
 
 
 def test_public_signup_and_login_paths_remain_open_after_accounts_exist(client):

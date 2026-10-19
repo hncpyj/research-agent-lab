@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import config
@@ -279,6 +279,51 @@ class CostTracker:
             "estimated_calls": int(row[4] or 0),
             "verified_zero_calls": int(row[5] or 0),
             "unknown_cost_calls": int(row[6] or 0),
+        }
+
+    def user_usage_window(self, user_id: str, days: int = 30, *, limit: int = 50,
+                          offset: int = 0) -> dict:
+        """Paginated non-secret usage for one account and an honest period summary."""
+        safe_days = min(max(int(days), 1), 365)
+        safe_limit = min(max(int(limit), 1), 100)
+        safe_offset = max(int(offset), 0)
+        since = (datetime.utcnow() - timedelta(days=safe_days)).isoformat(timespec="seconds")
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            has_sessions = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'research_sessions'"
+            ).fetchone()
+            if has_sessions is None:
+                return {"summary": {"calls": 0, "input_tokens": 0, "output_tokens": 0,
+                                    "estimated_cost_usd": 0.0, "unknown_cost_calls": 0},
+                        "records": [], "limit": safe_limit, "offset": safe_offset}
+            summary = conn.execute(
+                """
+                SELECT COUNT(*), COALESCE(SUM(u.input_tokens), 0),
+                       COALESCE(SUM(u.output_tokens), 0),
+                       COALESCE(SUM(CASE WHEN u.cost_known = 1 THEN u.cost_usd ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN u.cost_known = 0 THEN 1 ELSE 0 END), 0)
+                FROM api_usage_log u JOIN research_sessions s ON s.session_id = u.session_id
+                WHERE s.owner_id = ? AND u.timestamp >= ?
+                """, (user_id, since)).fetchone()
+            rows = conn.execute(
+                """
+                SELECT u.timestamp, u.session_id, u.task_type, u.provider,
+                       u.selected_model, u.actual_provider, u.actual_model,
+                       u.input_tokens, u.output_tokens, u.cost_usd, u.cost_known,
+                       u.fallback_attempts, u.retry_count
+                FROM api_usage_log u JOIN research_sessions s ON s.session_id = u.session_id
+                WHERE s.owner_id = ? AND u.timestamp >= ?
+                ORDER BY u.id DESC LIMIT ? OFFSET ?
+                """, (user_id, since, safe_limit, safe_offset)).fetchall()
+        return {
+            "summary": {"calls": int(summary[0] or 0),
+                        "input_tokens": int(summary[1] or 0),
+                        "output_tokens": int(summary[2] or 0),
+                        "estimated_cost_usd": float(summary[3] or 0.0),
+                        "unknown_cost_calls": int(summary[4] or 0)},
+            "records": [dict(row) for row in rows],
+            "limit": safe_limit, "offset": safe_offset, "days": safe_days,
         }
 
     def session_summary(self, since_timestamp: Optional[str] = None) -> dict:

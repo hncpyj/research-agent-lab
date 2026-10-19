@@ -60,6 +60,50 @@ def test_local_fallback_call_still_produces_exactly_one_row():
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def test_today_usage_separates_estimated_zero_and_unknown_cost_rows():
+    tracker, tmp_dir = _temp_tracker()
+    try:
+        tracker.log("claude-sonnet-4-5", 100, 20, "priced")
+        tracker.log("local:test", 10, 5, "local", is_local=True)
+        tracker.log("gateway:model", 7, 3, "unknown", cost_known=False)
+
+        usage = tracker.today_usage_details()
+        assert usage["calls"] == 3
+        assert usage["estimated_calls"] == 1
+        assert usage["verified_zero_calls"] == 1
+        assert usage["unknown_cost_calls"] == 1
+        assert usage["input_tokens"] == 117
+        assert usage["output_tokens"] == 28
+        assert usage["estimated_cost_usd"] > 0
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_user_route_history_never_includes_another_accounts_session():
+    import sqlite3
+
+    tracker, tmp_dir = _temp_tracker()
+    try:
+        with sqlite3.connect(tracker._db_path) as conn:
+            conn.execute(
+                "CREATE TABLE research_sessions (session_id TEXT PRIMARY KEY, owner_id TEXT)"
+            )
+            conn.executemany("INSERT INTO research_sessions VALUES (?, ?)", [
+                ("alice-session", "alice"), ("bob-session", "bob"),
+            ])
+        tracker.log("alice-model", 1, 1, "task", session_id="alice-session",
+                    provider="gemini", actual_provider="gemini")
+        tracker.log("bob-model", 1, 1, "task", session_id="bob-session",
+                    provider="groq", actual_provider="groq")
+
+        alice = tracker.user_routes("alice")
+        assert len(alice) == 1
+        assert alice[0]["actual_provider"] == "gemini"
+        assert "groq" not in str(alice)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def test_call_count_since_timestamp_scopes_to_current_run():
     """Powers the pipeline-end healthcheck: count only calls made during
     THIS run, not all-time history (an old session's calls shouldn't mask a

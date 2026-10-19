@@ -161,6 +161,14 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
 .field .help { font-size: 11.5px; color: var(--text-2); }
 .inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+.settings-subsection { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px; }
+.settings-subsection:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+.settings-subsection h3 { font-size: 13px; margin: 0 0 3px; }
+.settings-subsection > .hint { font-size: 12px; color: var(--text-1); margin: 0 0 12px; max-width: 78ch; }
+.credential-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.credential-card { background: var(--bg-0); border: 1px solid var(--border); border-radius: 7px; padding: 13px; }
+.credential-card .field { max-width: none; margin: 10px 0; }
+.usage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .kv { display: grid; grid-template-columns: 200px 1fr; gap: 2px 14px; font-size: 12.5px; }
 .kv dt { color: var(--text-2); padding: 5px 0; }
 .kv dd { margin: 0; padding: 5px 0; color: var(--text-0); font-family: 'JetBrains Mono', monospace; word-break: break-all; }
@@ -1960,32 +1968,55 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
     </div>
 
     <div class="panel">
-      <h2 data-i18n="keys.title">Your API keys</h2>
-      <p class="hint" data-i18n="keys.hint"></p>
-      <div class="rows" id="api-key-rows" style="margin-bottom:14px"></div>
-      <div class="inline-form">
-        <div class="field" style="margin:0">
-          <label for="api-key-provider" data-i18n="keys.provider">Provider</label>
-          <select id="api-key-provider" onchange="updateApiKeyFields()"></select>
+      <h2>API credentials</h2>
+      <p class="hint">Credentials are encrypted per account. Secret values are never returned to this page after saving.</p>
+      <div class="settings-subsection">
+        <h3>Automatic Free Models</h3>
+        <p class="hint">Simple Mode routes only across the Gemini and Groq keys saved in your account. It never pools keys between users.</p>
+        <div class="credential-grid">
+          <div class="credential-card">
+            <div class="t">Google Gemini</div><div class="m" id="key-status-gemini">—</div>
+            <div class="field"><label for="key-input-gemini">Gemini API key</label>
+              <input id="key-input-gemini" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste a new key"></div>
+            <button class="btn-primary btn-sm" onclick="saveNamedApiKey('gemini','key-input-gemini')">Save Gemini key</button>
+          </div>
+          <div class="credential-card">
+            <div class="t">Groq</div><div class="m" id="key-status-groq">—</div>
+            <div class="field"><label for="key-input-groq">Groq API key</label>
+              <input id="key-input-groq" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste a new key"></div>
+            <button class="btn-primary btn-sm" onclick="saveNamedApiKey('groq','key-input-groq')">Save Groq key</button>
+          </div>
         </div>
-        <div class="field" id="api-key-url-field" style="margin:0;flex:1" hidden>
-          <label for="api-key-url-input" data-i18n="keys.gatewayUrl">Gateway address</label>
-          <input id="api-key-url-input" type="url" autocomplete="off" spellcheck="false"
-                 placeholder="https://gateway.example.com/v1" style="min-width:260px">
-        </div>
-        <div class="field" style="margin:0;flex:1">
-          <label for="api-key-input" data-i18n="keys.key">API key</label>
-          <input id="api-key-input" type="password" autocomplete="off" spellcheck="false"
-                 data-i18n-ph="keys.placeholder" placeholder="sk-..." style="min-width:260px">
-        </div>
-        <button class="btn-primary btn-sm" onclick="saveApiKey()" data-i18n="common.save">Save</button>
       </div>
-      <p class="hint" data-i18n="keys.note"></p>
+      <div class="settings-subsection">
+        <h3>Other direct providers</h3>
+        <p class="hint">Use one exact provider and model when automatic routing is not appropriate.</p>
+        <div class="inline-form">
+          <div class="field" style="margin:0"><label for="single-key-provider">Provider</label>
+            <select id="single-key-provider"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option></select></div>
+          <div class="field" style="margin:0;flex:1"><label for="single-key-input">API key</label>
+            <input id="single-key-input" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste a new key"></div>
+          <button class="btn-primary btn-sm" onclick="saveNamedApiKey(document.getElementById('single-key-provider').value,'single-key-input')">Save key</button>
+        </div>
+        <div class="rows" id="direct-key-rows" style="margin-top:12px"></div>
+      </div>
+      <div class="settings-subsection">
+        <h3>Advanced: your FreeLLMAPI gateway</h3>
+        <p class="hint">Connect only a single-user gateway you control. The gateway URL and token are separate settings; this is not required for Simple Mode.</p>
+        <div class="m" id="key-status-freellmapi">—</div>
+        <div class="inline-form" style="margin-top:10px">
+          <div class="field" style="margin:0;flex:1"><label for="gateway-url-input">Gateway URL</label>
+            <input id="gateway-url-input" type="url" autocomplete="off" spellcheck="false" placeholder="https://gateway.example.com/v1"></div>
+          <div class="field" style="margin:0;flex:1"><label for="gateway-token-input">Gateway API token</label>
+            <input id="gateway-token-input" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste a new token"></div>
+          <button class="btn-primary btn-sm" onclick="saveGateway()">Save gateway</button>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
-      <h2 data-i18n="models.title">Models and cost</h2>
-      <p class="hint" data-i18n="models.hint"></p>
+      <h2>Model access and routing</h2>
+      <p class="hint" id="models-scope-hint" data-i18n="models.hint"></p>
       <div class="row-item" style="margin-bottom:12px">
         <div class="grow">
           <div class="t" data-i18n="models.paidApi">Model API</div>
@@ -1994,9 +2025,26 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
         <button class="btn-secondary btn-sm" onclick="toggleApi()" data-i18n="models.toggle">Toggle</button>
       </div>
       <div class="field">
+        <label for="model-access-mode">Access mode</label>
+        <select id="model-access-mode" onchange="renderModelAccessFields(true)">
+          <option value="automatic">Automatic Free Models (Simple Mode)</option>
+          <option value="single">One provider</option>
+          <option value="advanced">Advanced FreeLLMAPI gateway</option>
+        </select>
+      </div>
+      <div class="field" id="provider-field">
         <label for="provider-select" data-i18n="models.provider">Provider</label>
-        <select id="provider-select" onchange="changeProvider()"></select>
+        <select id="provider-select" onchange="renderProviderFields(true)"></select>
         <span class="help" id="provider-help">—</span>
+      </div>
+      <div class="field" id="routing-policy-field">
+        <label for="routing-policy-select">Routing preference</label>
+        <select id="routing-policy-select">
+          <option value="simple:balanced">Balanced</option>
+          <option value="simple:gemini-first">Gemini first</option>
+          <option value="simple:groq-first">Groq first</option>
+        </select>
+        <span class="help">The actual provider and model are recorded for every successful call.</span>
       </div>
       <div class="field" id="server-url-field" hidden>
         <label for="server-url-input" data-i18n="models.serverUrl">Server address</label>
@@ -2007,22 +2055,27 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
         </div>
         <span class="help" id="server-url-help" data-i18n-html="models.serverHint"></span>
       </div>
-      <div class="field">
+      <div class="field" id="model-field">
         <label for="model-input" data-i18n="models.model">Model</label>
         <input id="model-input" list="model-suggestions" spellcheck="false">
         <datalist id="model-suggestions"></datalist>
         <span class="help" id="model-help">—</span>
       </div>
+      <div class="settings-subsection">
+      <h3>Usage and limits</h3>
+      <p class="hint">Costs shown here are estimates from configured published rates, not provider invoices. Unknown-cost calls stay marked unknown.</p>
+      <div class="usage-grid" id="usage-today"></div>
       <div class="field">
         <label for="budget-input" data-i18n="models.budget">Daily cap (USD)</label>
         <input id="budget-input" type="number" min="0" step="0.5">
         <span class="help" id="budget-help">—</span>
       </div>
+      </div>
       <button class="btn-primary btn-sm" onclick="saveModelSettings()" data-i18n="common.save">Save</button>
       <div id="model-route-history" style="margin-top:14px"></div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="local-model-panel">
       <h2 data-i18n="local.title">Local model</h2>
       <p class="hint" data-i18n-html="local.hint"></p>
       <div id="local-state"></div>
@@ -2336,7 +2389,7 @@ en: {
   'tokens.deleted': 'Deleted',
 
   'models.title': 'Models and cost',
-  'models.hint': 'Model API is stored per session. Hosted sessions use your selected BYOK provider when its key is saved; otherwise they use the shared free model. Turning it off makes model-dependent phases pause before any external request.',
+  'models.hint': 'The provider choice is fixed on each session when it is created. Account defaults apply only to new sessions; turning model access off pauses model-dependent phases before any external request.',
   'models.paidApi': 'Model API',
   'models.toggle': 'Toggle',
   'models.on': 'on',
@@ -2349,7 +2402,7 @@ en: {
   'models.provider': 'Provider',
   'models.noKey': ' — no key',
   'models.keySet': '{env} is set · <a href="{docs}" target="_blank" rel="noreferrer">pricing</a>',
-  'models.keyMissing': 'No server key is configured for this provider. Hosted users without BYOK continue on the shared free model.',
+  'models.keyMissing': 'No credential is configured for this provider.',
   'models.gatewaySet': 'Your encrypted gateway configuration is set: <span class="m">{url}</span>',
   'models.gatewayMissing': 'Save your user-owned FreeLLMAPI gateway address and token under Your API keys first.',
   'models.simpleSet': 'Simple Mode can use your saved keys for: {providers}. It records the actual provider, model, and fallback count.',
@@ -2367,7 +2420,7 @@ en: {
   'models.budgetFromEnv': ' · this value comes from API_DAILY_BUDGET_USD in .env',
   'models.budgetFromPage': ' · saved on this page',
   'models.switched': 'Switched to {provider}',
-  'models.switchedNoKey': 'Preferred BYOK provider set to {provider}; the shared free model remains active until you save your own key.',
+  'models.switchedNoKey': 'Preferred provider set to {provider}; it remains unavailable until a usable credential is configured.',
   'models.switchFailed': 'Could not switch provider',
   'models.needNumber': 'Enter a number of 0 or more',
   'models.saved': 'Saved — {provider} / {model}',
@@ -2452,13 +2505,13 @@ en: {
   'keys.note': 'Keys are stored encrypted and are never shown again — only the first and last few characters.',
   'keys.none': 'No key saved',
   'keys.serverKey': 'Using the key set on this server',
-  'keys.localOnly': 'No key — runs use the local model',
+  'keys.localOnly': 'No credential available for this route',
   'keys.added': 'Added {date}',
   'keys.usedNever': 'not used yet',
   'keys.used': 'last used {when}',
   'keys.replace': 'Replace',
   'keys.delete': 'Delete',
-  'keys.deleteConfirm': 'Delete your {provider} key? Runs will fall back to the local model.',
+  'keys.deleteConfirm': 'Delete your {provider} key? That route will become unavailable unless another configured route can serve the request.',
   'keys.saved': 'Key saved',
   'keys.deleted': 'Key deleted',
   'keys.saveFailed': 'The key could not be saved',
@@ -3051,7 +3104,12 @@ const VIEWS = {
   research:  {el: 'body',           load: null},
   dashboard: {el: 'view-dashboard', load: () => loadDashboard()},
   manage:    {el: 'view-manage',    load: async () => { await loadProjects(); loadManage(); loadBackups(); }},
-  settings:  {el: 'view-settings',  load: () => { loadAccountSettings(); loadTokens(); loadApiKeys(); loadSettingsPanel(); loadLocalModels(); loadEnvironment(); }},
+  settings:  {el: 'view-settings',  load: async () => {
+    loadAccountSettings(); loadTokens(); loadEnvironment();
+    await loadSettingsPanel();
+    await loadApiKeys();
+    if (!(window._settingsSnapshot || {}).hosted) loadLocalModels();
+  }},
 };
 
 function showView(name) {
@@ -3473,59 +3531,41 @@ async function revokeToken(tokenId, name) {
 async function loadApiKeys() {
   let d;
   try { d = await (await api('/api/keys')).json(); } catch(e) { return; }
-  const rows = document.getElementById('api-key-rows');
-  rows.innerHTML = (d.providers || []).map(p => {
+  window._keyProviders = d.providers || [];
+  const statusHtml = p => {
     const stored = p.stored;
-    let state, actions;
     if (stored) {
       const added = stored.created_at ? t('keys.added', {date: esc(stored.created_at.slice(0, 10))}) : '';
       const used = stored.last_used_at
         ? t('keys.used', {when: esc(stored.last_used_at.slice(0, 16).replace('T', ' '))})
         : t('keys.usedNever');
-      state = `<div class="m">${esc(stored.hint)}</div>
-               <div class="m" style="color:var(--text-2)">${added} · ${used}</div>`;
-      actions = `<button class="btn-secondary btn-sm btn-danger"
-                   onclick="deleteApiKey('${esc(p.provider)}', '${esc(p.label)}')">${t('keys.delete')}</button>`;
-    } else {
-      const fallback = p.server_key_available ? t('keys.serverKey') : t('keys.localOnly');
-      state = `<div class="m">${t('keys.none')}</div>
-               <div class="m" style="color:var(--text-2)">${fallback}</div>`;
-      actions = '';
+      return `<span>${esc(stored.hint)} · ${added} · ${used}</span>
+        <button class="btn-secondary btn-sm btn-danger" style="margin-left:8px"
+          onclick="deleteApiKey('${esc(p.provider)}','${esc(p.label)}')">${t('keys.delete')}</button>`;
     }
-    return `<div class="row-item"><div class="grow"><div class="t">${esc(p.label)}</div>${state}</div>${actions}</div>`;
+    return '<span>No credential saved for this account.</span>';
+  };
+  ['gemini', 'groq', 'freellmapi'].forEach(name => {
+    const target = document.getElementById('key-status-' + name);
+    const provider = window._keyProviders.find(p => p.provider === name);
+    if (target && provider) target.innerHTML = statusHtml(provider);
+    if (name === 'freellmapi' && provider && provider.base_url) {
+      document.getElementById('gateway-url-input').value = provider.base_url;
+    }
+  });
+  document.getElementById('direct-key-rows').innerHTML = ['anthropic', 'openai'].map(name => {
+    const p = window._keyProviders.find(item => item.provider === name);
+    return p ? `<div class="row-item"><div class="grow"><div class="t">${esc(p.label)}</div><div class="m">${statusHtml(p)}</div></div></div>` : '';
   }).join('');
-
-  const select = document.getElementById('api-key-provider');
-  select.innerHTML = (d.providers || []).map(p =>
-    `<option value="${esc(p.provider)}">${esc(p.label)}</option>`).join('');
-  window._keyProviders = d.providers || [];
-  updateApiKeyFields();
 }
 
-function updateApiKeyFields() {
-  const select = document.getElementById('api-key-provider');
-  const provider = select ? select.value : '';
-  const selected = (window._keyProviders || []).find(p => p.provider === provider) || {};
-  const gateway = !!selected.user_configurable_url;
-  document.getElementById('api-key-url-field').hidden = !gateway;
-  document.getElementById('api-key-url-input').value = gateway ? (selected.base_url || '') : '';
-  document.querySelector('label[for="api-key-input"]').textContent =
-    gateway ? 'Gateway token' : t('keys.key');
-  const note = document.querySelector('[data-i18n="keys.note"]');
-  if (note) note.textContent = gateway ? t('keys.gatewayNote') : t('keys.note');
-}
-
-async function saveApiKey() {
-  const provider = document.getElementById('api-key-provider').value;
-  const field = document.getElementById('api-key-input');
+async function saveNamedApiKey(provider, fieldId, baseUrl) {
+  const field = document.getElementById(fieldId);
+  if (!field.value.trim()) { toast('Enter a key or token first.', 'error'); return; }
   try {
     const r = await api('/api/keys/' + encodeURIComponent(provider), {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        key: field.value,
-        base_url: document.getElementById('api-key-url-field').hidden
-          ? '' : document.getElementById('api-key-url-input').value.trim()
-      })
+      body: JSON.stringify({key: field.value, base_url: baseUrl || ''})
     });
     const d = await r.json();
     if (!r.ok) { toast(d.detail || t('keys.saveFailed'), 'error'); return; }
@@ -3535,8 +3575,14 @@ async function saveApiKey() {
   } catch(e) { toast(t('keys.saveFailed'), 'error'); }
 }
 
+function saveGateway() {
+  const url = document.getElementById('gateway-url-input').value.trim();
+  if (!url) { toast('Enter the gateway URL first.', 'error'); return; }
+  return saveNamedApiKey('freellmapi', 'gateway-token-input', url);
+}
+
 async function deleteApiKey(provider, label) {
-  if (!confirm(t('keys.deleteConfirm', {provider: label}))) return;
+  if (!confirm(`Delete your ${label} credential? That route will become unavailable unless another configured route can serve the request.`)) return;
   try {
     const r = await api('/api/keys/' + encodeURIComponent(provider), {method: 'DELETE'});
     if (!r.ok) { toast(t('common.removeFailed'), 'error'); return; }
@@ -3558,6 +3604,10 @@ function _sessionSettingsBody(values) {
 async function loadSettingsPanel() {
   let d;
   try { d = await (await api(_settingsUrl())).json(); } catch(e) { return; }
+  window._settingsSnapshot = d;
+  document.getElementById('models-scope-hint').textContent = state.currentId
+    ? 'These controls apply to the open research session. Its provider choice remains durable across refresh and resume.'
+    : 'These are account defaults for new sessions. Existing sessions keep their own provider choice.';
   _providers = d.providers || [];
   _renderApiToggle(d.use_api);
   _renderSpend(d);
@@ -3574,6 +3624,10 @@ async function loadSettingsPanel() {
     routeText = t('models.simpleByok', {
       model: d.effective_model || d.api_model || t('models.noModel')
     });
+  } else if (d.use_api && d.inference_mode === 'simple_byok_unavailable') {
+    routeText = 'on — Simple Mode unavailable until you save a Gemini or Groq key';
+  } else if (d.use_api && d.inference_mode === 'unavailable') {
+    routeText = 'on — no usable credential is configured for this route';
   } else if (d.use_api && d.inference_mode === 'byok') {
     routeText = t('models.byok', {
       provider: current.label || d.api_provider,
@@ -3587,12 +3641,14 @@ async function loadSettingsPanel() {
   }
   document.getElementById('settings-api-state').textContent = routeText;
 
+  const accessMode = d.api_provider === 'auto_byok' ? 'automatic'
+    : d.api_provider === 'freellmapi' ? 'advanced' : 'single';
+  document.getElementById('model-access-mode').value = accessMode;
   const select = document.getElementById('provider-select');
-  select.innerHTML = _providers.map(p =>
+  select.innerHTML = _providers.filter(p => !p.managed_router && !p.user_configurable_url).map(p =>
     `<option value="${esc(p.name)}"${p.name === d.api_provider ? ' selected' : ''}>` +
     `${esc(p.label)}${p.key_set || p.user_credential_set || p.configurable_url ? '' : t('models.noKey')}</option>`).join('');
-  // A provider with no key in .env is still selectable: runs then stay local
-  // and say so, which is better than hiding the option and looking broken.
+  if (accessMode !== 'single' && !select.value) select.selectedIndex = 0;
   const urlField = document.getElementById('server-url-field');
   urlField.hidden = !current.configurable_url;
   if (current.managed_router) {
@@ -3616,15 +3672,32 @@ async function loadSettingsPanel() {
   }
 
   document.getElementById('model-input').value = d.api_model || '';
+  document.getElementById('routing-policy-select').value = d.api_provider === 'auto_byok'
+    ? (d.api_model || 'simple:balanced') : 'simple:balanced';
   document.getElementById('model-suggestions').innerHTML =
     (current.models || []).map(m => `<option value="${esc(m)}"></option>`).join('');
   document.getElementById('model-help').textContent = current.managed_router
     ? t('models.simpleWarning') : t('models.modelHint');
 
   document.getElementById('budget-input').value = d.daily_budget_usd || 0;
+  document.getElementById('budget-input').disabled = !d.budget_editable;
   document.getElementById('budget-help').textContent =
     t('models.spentToday', {spent: (d.spend_today_usd || 0).toFixed(2)}) +
-    (d.budget_from_env ? t('models.budgetFromEnv') : t('models.budgetFromPage'));
+    (d.budget_editable
+      ? (d.budget_from_env ? t('models.budgetFromEnv') : t('models.budgetFromPage'))
+      : ' · operator-defined hosted limit (read-only)');
+  const usage = d.usage_today || {};
+  document.getElementById('usage-today').innerHTML = [
+    ['Calls', usage.calls || 0],
+    ['Input tokens', (usage.input_tokens || 0).toLocaleString()],
+    ['Output tokens', (usage.output_tokens || 0).toLocaleString()],
+    ['Estimated cost', '$' + Number(usage.estimated_cost_usd || 0).toFixed(4)],
+    ['Verified $0 calls', usage.verified_zero_calls || 0],
+    ['Unknown-cost calls', usage.unknown_cost_calls || 0],
+  ].map(([label, value]) => `<div class="row-item"><div><div class="m">${esc(label)}</div><div class="t">${esc(String(value))}</div></div></div>`).join('');
+
+  document.getElementById('local-model-panel').hidden = !!d.hosted;
+  renderModelAccessFields();
 
   const history = d.route_history || [];
   document.getElementById('model-route-history').innerHTML = history.length ?
@@ -3641,21 +3714,39 @@ async function loadSettingsPanel() {
     }).join('') : '';
 }
 
-/** Switching provider shows that provider's model and key state right away. */
-async function changeProvider() {
+function renderModelAccessFields(userChanged) {
+  const mode = document.getElementById('model-access-mode').value;
+  document.getElementById('provider-field').hidden = mode !== 'single';
+  document.getElementById('routing-policy-field').hidden = mode !== 'automatic';
+  document.getElementById('model-field').hidden = mode === 'automatic';
+  document.getElementById('server-url-field').hidden = true;
+  if (mode === 'single') renderProviderFields(!!userChanged);
+  if (mode === 'advanced') {
+    const gateway = _providers.find(p => p.name === 'freellmapi') || {};
+    if (userChanged) document.getElementById('model-input').value = gateway.default_model || 'auto:balanced';
+    document.getElementById('provider-help').innerHTML = gateway.user_credential_set
+      ? t('models.gatewaySet', {url: esc(gateway.user_base_url || '')})
+      : t('models.gatewayMissing');
+    document.getElementById('model-suggestions').innerHTML =
+      (gateway.models || []).map(m => `<option value="${esc(m)}"></option>`).join('');
+  }
+}
+
+function renderProviderFields(resetModel) {
   const name = document.getElementById('provider-select').value;
-  try {
-    const r = await api('/api/settings', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(_sessionSettingsBody({api_provider: name}))
-    });
-    const d = await r.json();
-    await loadSettingsPanel();
-    const p = _providers.find(x => x.name === name) || {};
-    const label = p.label || name;
-    toast(d.inference_mode === 'shared_free' ? t('models.switchedNoKey', {provider: label})
-                                             : t('models.switched', {provider: label}), 'info');
-  } catch(e) { toast(t('models.switchFailed'), 'error'); }
+  const current = _providers.find(p => p.name === name) || {};
+  const urlField = document.getElementById('server-url-field');
+  urlField.hidden = !current.configurable_url || !!(window._settingsSnapshot || {}).hosted;
+  document.getElementById('provider-help').innerHTML = current.configurable_url
+    ? (current.ready ? t('models.serverSet', {url: esc(current.base_url)}) : t('models.serverMissing'))
+    : current.user_credential_set
+      ? `Your encrypted ${esc(current.label || name)} credential is set.`
+      : current.key_set
+        ? t('models.keySet', {env: esc(current.key_env), docs: esc(current.docs)})
+        : 'No credential is available for this provider. Save your own key above.';
+  document.getElementById('model-suggestions').innerHTML =
+    (current.models || []).map(m => `<option value="${esc(m)}"></option>`).join('');
+  if (resetModel) document.getElementById('model-input').value = current.default_model || '';
 }
 
 /** Ask the server itself which models it serves, instead of typing a guess. */
@@ -3682,15 +3773,24 @@ async function loadServerModels() {
 }
 
 async function saveModelSettings() {
-  const value = parseFloat(document.getElementById('budget-input').value);
-  if (isNaN(value) || value < 0) { toast(t('models.needNumber'), 'error'); return; }
+  const snapshot = window._settingsSnapshot || {};
+  const mode = document.getElementById('model-access-mode').value;
+  const provider = mode === 'automatic' ? 'auto_byok'
+    : mode === 'advanced' ? 'freellmapi' : document.getElementById('provider-select').value;
+  const model = mode === 'automatic' ? document.getElementById('routing-policy-select').value
+    : document.getElementById('model-input').value.trim();
   const body = {
-    daily_budget_usd: value,
-    api_provider: document.getElementById('provider-select').value,
-    api_model: document.getElementById('model-input').value.trim(),
+    api_provider: provider,
+    api_model: model,
   };
   if (state.currentId) body.session_id = state.currentId;
-  if (!document.getElementById('server-url-field').hidden) {
+  let value = Number(snapshot.daily_budget_usd || 0);
+  if (snapshot.budget_editable) {
+    value = parseFloat(document.getElementById('budget-input').value);
+    if (isNaN(value) || value < 0) { toast(t('models.needNumber'), 'error'); return; }
+    body.daily_budget_usd = value;
+  }
+  if (!snapshot.hosted && !document.getElementById('server-url-field').hidden) {
     body.local_server_url = document.getElementById('server-url-input').value.trim();
   }
   try {
@@ -3702,7 +3802,9 @@ async function saveModelSettings() {
     if (!r.ok) { toast(d.detail || t('common.saveFailed'), 'error'); return; }
     _renderSpend(d);
     toast(t('models.saved', {provider: d.api_provider, model: d.api_model}) +
-          (value > 0 ? t('models.savedCap', {cap: value.toFixed(2)}) : t('models.savedNoCap')), 'success');
+          (snapshot.budget_editable
+            ? (value > 0 ? t('models.savedCap', {cap: value.toFixed(2)}) : t('models.savedNoCap'))
+            : ''), 'success');
     loadSettingsPanel();
   } catch(e) { toast(t('common.saveFailed'), 'error'); }
 }
@@ -3789,6 +3891,7 @@ async function loadEnvironment() {
     : t('env.noHostLimit');
   const keyState = set => set ? t('env.keySet') : t('env.keyMissing');
   const rows = [
+    ['Deployment mode', d.hosted ? 'hosted' : 'local'],
     [t('env.python'), d.python],
     [t('env.runnerPython'), d.runner_python],
     [t('env.pip'), d.runner_allow_pip ? t('env.yes') : t('env.noPip')],
@@ -3798,7 +3901,6 @@ async function loadEnvironment() {
     [t('env.geminiKey'), keyState(d.gemini_key_set)],
     [t('env.envProvider'), d.api_provider],
     [t('env.envModel'), d.api_model],
-    [t('env.ollama'), d.ollama_model + ' @ ' + d.ollama_host + ' · ctx ' + d.ollama_num_ctx],
     [t('env.paperSources'), (d.paper_sources || []).join(', ')],
     [t('env.requestInterval'), t('env.seconds', {from: d.request_interval_s[0], to: d.request_interval_s[1]})],
     [t('env.datasetMax'), d.dataset_max_mb + ' MB'],
@@ -3807,6 +3909,9 @@ async function loadEnvironment() {
     [t('env.experiments'), d.paths.experiments],
     [t('env.datasets'), d.paths.datasets],
   ];
+  if (!d.hosted) {
+    rows.splice(10, 0, [t('env.ollama'), d.ollama_model + ' @ ' + d.ollama_host + ' · ctx ' + d.ollama_num_ctx]);
+  }
   document.getElementById('env-rows').innerHTML =
     rows.map(pair => `<dt>${esc(pair[0])}</dt><dd>${esc(String(pair[1]))}</dd>`).join('');
 }

@@ -234,6 +234,69 @@ def test_signed_out_requests_cannot_read_anything(client):
     assert client.get("/api/auth/me").status_code == 200
 
 
+def test_model_defaults_are_isolated_per_account_and_seed_new_sessions(client):
+    _signup(client, "alice-models@example.com")
+    alice = client.post("/api/settings", json={
+        "api_provider": "auto_byok", "api_model": "simple:gemini-first",
+        "use_api": True,
+    })
+    assert alice.status_code == 200
+    assert alice.json()["api_provider"] == "auto_byok"
+    assert alice.json()["api_model"] == "simple:gemini-first"
+    alice_session = _new_session(client, "Alice routing")
+    assert NoteDB().get_session(alice_session)["model_provider"] == "auto_byok"
+
+    client.post("/api/auth/logout")
+    _signup(client, "bob-models@example.com")
+    bob = client.post("/api/settings", json={
+        "api_provider": "groq", "api_model": "openai/gpt-oss-20b",
+        "use_api": False,
+    })
+    assert bob.status_code == 200
+    assert bob.json()["api_provider"] == "groq"
+    bob_session = _new_session(client, "Bob routing")
+    bob_row = NoteDB().get_session(bob_session)
+    assert bob_row["model_provider"] == "groq"
+    assert bob_row["model_api_enabled"] == 0
+
+    client.post("/api/auth/logout")
+    assert client.post("/api/auth/login", json={
+        "email": "alice-models@example.com", "password": GOOD_PASSWORD,
+    }).status_code == 200
+    restored = client.get("/api/settings").json()
+    assert restored["api_provider"] == "auto_byok"
+    assert restored["api_model"] == "simple:gemini-first"
+    assert restored["use_api"] is True
+
+
+def test_hosted_accounts_cannot_reconfigure_operator_or_local_model_settings(
+    client, monkeypatch
+):
+    _signup(client, "hosted-settings@example.com")
+    monkeypatch.setattr(config, "HOSTED", True)
+
+    cap = client.post("/api/settings", json={"daily_budget_usd": 1.0})
+    assert cap.status_code == 403
+    local_url = client.post("/api/settings", json={
+        "local_server_url": "http://127.0.0.1:1234/v1",
+    })
+    assert local_url.status_code == 403
+    assert client.get("/api/local-models").status_code == 404
+    assert client.get("/api/local-server/models?url=http://127.0.0.1:1234/v1").status_code == 404
+
+
+def test_settings_html_separates_simple_keys_and_advanced_gateway(client):
+    html = client.get("/").text
+    assert 'id="key-input-gemini"' in html
+    assert 'id="key-input-groq"' in html
+    assert 'id="gateway-url-input"' in html
+    assert 'id="gateway-token-input"' in html
+    assert 'id="model-access-mode"' in html
+    assert 'id="local-model-panel"' in html
+    assert "value = provider.base_url" in html
+    assert "gateway-token-input').value =" not in html
+
+
 def test_public_signup_and_login_paths_remain_open_after_accounts_exist(client):
     _signup(client, "owner@example.com")
     client.post("/api/auth/logout")

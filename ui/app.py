@@ -206,20 +206,34 @@ class AssignProjectRequest(BaseModel):
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
-def _session_inference_settings(session: dict | None) -> tuple[bool, str]:
-    """Return the durable inference toggle/provider for one session."""
+def _account_inference_defaults(user_id: str = "") -> tuple[bool, str, str]:
+    """Return process defaults locally and isolated account defaults when hosted."""
     from tools import app_settings
 
+    if user_id:
+        from memory import model_preferences
+        prefs = model_preferences.load(user_id)
+        provider = prefs["api_provider"]
+        return bool(prefs["use_api"]), provider, model_preferences.api_model(user_id, provider)
+    provider = app_settings.api_provider()
+    return bool(_settings["use_api"]), provider, app_settings.api_model(provider)
+
+
+def _session_inference_settings(session: dict | None, user_id: str = "") -> tuple[bool, str]:
+    """Return the durable inference toggle/provider for one session."""
+    default_enabled, default_provider, _ = _account_inference_defaults(user_id)
     if not session:
-        return bool(_settings["use_api"]), app_settings.api_provider()
+        return default_enabled, default_provider
     raw_enabled = session.get("model_api_enabled")
-    enabled = bool(_settings["use_api"]) if raw_enabled is None else bool(raw_enabled)
-    provider = (session.get("model_provider") or app_settings.api_provider()).strip().lower()
+    enabled = default_enabled if raw_enabled is None else bool(raw_enabled)
+    provider = (session.get("model_provider") or default_provider).strip().lower()
     return enabled, provider
 
 
-def _effective_inference_route(request: Request, enabled: bool, provider: str) -> dict:
+def _effective_inference_route(request: Request, enabled: bool, provider: str,
+                               model: str = "") -> dict:
     """Describe the actual route without returning or logging any credential."""
+    from models import providers
     from tools import app_settings
 
     if not enabled:
@@ -231,9 +245,9 @@ def _effective_inference_route(request: Request, enabled: bool, provider: str) -
         stored = {item.provider for item in api_keys.list_keys(user_id)}
         routes = [name for name in config.SIMPLE_BYOK_PROVIDERS if name in stored]
         return {
-            "inference_mode": "simple_byok",
+            "inference_mode": "simple_byok" if routes else "simple_byok_unavailable",
             "effective_provider": "auto_byok",
-            "effective_model": app_settings.api_model("auto_byok"),
+            "effective_model": model or app_settings.api_model("auto_byok"),
             "configured_routes": routes,
         }
     if config.HOSTED:
@@ -243,17 +257,25 @@ def _effective_inference_route(request: Request, enabled: bool, provider: str) -
             return {
                 "inference_mode": "byok",
                 "effective_provider": provider,
-                "effective_model": app_settings.api_model(provider),
+                "effective_model": model or app_settings.api_model(provider),
             }
-        return {
+        try:
+            shared_available = bool(providers.resolve(config.SHARED_FREE_PROVIDER).key())
+        except Exception:
+            shared_available = False
+        return ({
             "inference_mode": "shared_free",
             "effective_provider": config.SHARED_FREE_PROVIDER,
             "effective_model": config.SHARED_FREE_MODEL,
-        }
+        } if shared_available else {
+            "inference_mode": "unavailable",
+            "effective_provider": "",
+            "effective_model": "",
+        })
     return {
         "inference_mode": "configured",
         "effective_provider": provider,
-        "effective_model": app_settings.api_model(provider),
+        "effective_model": model or app_settings.api_model(provider),
     }
 
 
@@ -264,21 +286,30 @@ async def get_settings(request: Request, session_id: str = ""):
     from tools import app_settings
     from tools.cost_tracker import CostTracker
 
+    user = _current_user(request)
+    user_id = user.user_id if user else ""
     spent = 0.0
+    usage_today = {}
     try:
-        spent = CostTracker().spend_today()
+        tracker = CostTracker()
+        usage_today = tracker.today_usage_details(user_id)
+        spent = usage_today["estimated_cost_usd"]
     except Exception as exc:
         logger.warning("Could not read today's API spend: %s", exc)
     session = None
     if session_id:
         _authorise_session(session_id, request)
         session = NoteDB().get_session(session_id)
-    enabled, provider = _session_inference_settings(session)
-    route = _effective_inference_route(request, enabled, provider)
+    enabled, provider = _session_inference_settings(session, user_id)
+    if user_id:
+        from memory import model_preferences
+        selected_model = model_preferences.api_model(user_id, provider)
+    else:
+        selected_model = app_settings.api_model(provider)
+    route = _effective_inference_route(request, enabled, provider, selected_model)
     provider_rows = providers.describe()
     try:
         from memory import api_keys
-        user = _current_user(request)
         user_id = user.user_id if user else api_keys.LOCAL_USER
         credentials = {row["provider"]: row for row in
                        api_keys.describe(user_id)["providers"]}
@@ -294,12 +325,22 @@ async def get_settings(request: Request, session_id: str = ""):
                 row["user_credential_set"] = bool(routes)
     except Exception as exc:
         logger.warning("Could not describe per-user provider configuration: %s", exc)
-    route_history = CostTracker().session_routes(session_id, limit=20) if session_id else []
+    tracker = CostTracker()
+    route_history = (tracker.session_routes(session_id, limit=20) if session_id
+                     else tracker.user_routes(user_id, limit=20) if user_id else [])
+    try:
+        shared_free_available = bool(providers.resolve(config.SHARED_FREE_PROVIDER).key())
+    except providers.ProviderUnavailable:
+        shared_free_available = False
     return {"use_api": enabled, **route, "spend_today_usd": round(spent, 4),
+            "usage_today": usage_today,
             "daily_budget_usd": app_settings.daily_budget_usd(),
             "budget_from_env": app_settings.load()["daily_budget_usd"] is None,
+            "budget_editable": not config.HOSTED,
+            "hosted": config.HOSTED,
+            "shared_free_available": shared_free_available,
             "api_provider": provider,
-            "api_model": app_settings.api_model(provider),
+            "api_model": selected_model,
             "local_server_url": app_settings.local_server_url(),
             "providers": provider_rows, "route_history": route_history}
 
@@ -311,6 +352,8 @@ async def update_settings(req: SettingsRequest, request: Request):
     from tools import app_settings
 
     session_id = req.session_id.strip()
+    user = _require_user(request)
+    user_id = user.user_id if user else ""
     session_updates: dict = {}
     if session_id:
         _authorise_session(session_id, request)
@@ -318,10 +361,16 @@ async def update_settings(req: SettingsRequest, request: Request):
     if req.use_api is not None:
         if session_id:
             session_updates["model_api_enabled"] = bool(req.use_api)
+        elif user_id:
+            from memory import model_preferences
+            model_preferences.save(user_id, use_api=req.use_api)
         else:
             _settings["use_api"] = req.use_api
             stored["use_api"] = req.use_api
     if req.daily_budget_usd is not None:
+        if config.HOSTED:
+            raise HTTPException(status_code=403,
+                                detail="The hosted daily cap is set by the service operator.")
         if req.daily_budget_usd < 0:
             raise HTTPException(status_code=400, detail="A daily cap cannot be negative.")
         stored["daily_budget_usd"] = float(req.daily_budget_usd)
@@ -332,6 +381,9 @@ async def update_settings(req: SettingsRequest, request: Request):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if session_id:
             session_updates["model_provider"] = req.api_provider.strip().lower()
+        elif user_id:
+            from memory import model_preferences
+            model_preferences.save(user_id, api_provider=req.api_provider)
         else:
             stored["api_provider"] = req.api_provider.strip().lower()
     if session_updates:
@@ -340,10 +392,17 @@ async def update_settings(req: SettingsRequest, request: Request):
         if runner and runner.is_alive():
             updated_session = NoteDB().get_session(session_id)
             enabled, provider = _session_inference_settings(updated_session)
-            runner.configure_model_api(enabled, provider)
+            model = None
+            if user_id:
+                from memory import model_preferences
+                model = model_preferences.api_model(user_id, provider)
+            runner.configure_model_api(enabled, provider, model)
     if stored:
         app_settings.save(stored)
     if req.local_server_url is not None:
+        if config.HOSTED:
+            raise HTTPException(status_code=403,
+                                detail="A hosted account cannot configure this server's local model address.")
         address = req.local_server_url.strip().rstrip("/")
         if address and not address.startswith(("http://", "https://")):
             raise HTTPException(status_code=400,
@@ -351,7 +410,25 @@ async def update_settings(req: SettingsRequest, request: Request):
         app_settings.save({"local_server_url": address or None})
     if req.api_model is not None:
         # Kept per provider, so switching back and forth does not lose a choice.
-        app_settings.set_api_model(req.api_provider or app_settings.api_provider(), req.api_model)
+        chosen_provider = req.api_provider or _session_inference_settings(
+            NoteDB().get_session(session_id) if session_id else None, user_id)[1]
+        if user_id:
+            from memory import model_preferences
+            model_preferences.save(user_id, model_provider=chosen_provider,
+                                   api_model=req.api_model)
+        else:
+            app_settings.set_api_model(chosen_provider, req.api_model)
+    if session_id:
+        runner = _runners.get(session_id)
+        if runner and runner.is_alive():
+            updated_session = NoteDB().get_session(session_id)
+            enabled, provider = _session_inference_settings(updated_session, user_id)
+            if user_id:
+                from memory import model_preferences
+                model = model_preferences.api_model(user_id, provider)
+            else:
+                model = app_settings.api_model(provider)
+            runner.configure_model_api(enabled, provider, model)
     return await get_settings(request, session_id=session_id)
 
 
@@ -364,6 +441,8 @@ async def local_server_models(url: str = ""):
     typed on the settings page by whoever is signed in, and pointing at a
     server on this machine is the whole purpose.
     """
+    if config.HOSTED:
+        raise HTTPException(status_code=404, detail="Local model controls are not available in hosted mode.")
     import json as _json
     import urllib.error
     import urllib.request
@@ -395,6 +474,8 @@ async def local_models():
     What Ollama has installed on this machine, so the local model can be
     picked from a list instead of guessed at and typed into .env.
     """
+    if config.HOSTED:
+        raise HTTPException(status_code=404, detail="Local model controls are not available in hosted mode.")
     import json as _json
     import urllib.request
 
@@ -436,6 +517,8 @@ async def choose_local_model(req: LocalModelRequest):
     Pick the local model. It takes effect for runs started after this; a
     session already running keeps the model it loaded.
     """
+    if config.HOSTED:
+        raise HTTPException(status_code=404, detail="Local model controls are not available in hosted mode.")
     from tools import app_settings
 
     stored: dict = {}
@@ -467,21 +550,25 @@ async def usage(request: Request):
     user = _require_user(request)
     left = quota.allowance(user)
     plan = plans.plan_for(user)
-    spend_today = 0.0
+    usage_today = {}
     try:
-        spend_today = CostTracker().spend_today()
+        usage_today = CostTracker().today_usage_details(user.user_id if user else "")
     except Exception as exc:
         logger.warning("Could not read today's spend: %s", exc)
+    _, default_provider, _ = _account_inference_defaults(user.user_id if user else "")
     return {
+        "hosted": config.HOSTED,
         "plan": plan.as_dict(),
         "hosted_runs": left.as_dict(),
-        "own_api_key": {"spend_today_usd": round(spend_today, 4),
+        "own_api_key": {"estimated_cost_today_usd": round(
+                            usage_today.get("estimated_cost_usd", 0.0), 4),
+                        "unknown_cost_calls": usage_today.get("unknown_cost_calls", 0),
                         "daily_cap_usd": app_settings.daily_budget_usd(),
-                        "provider": app_settings.api_provider(),
-                        "billed_by": "your own provider account"},
+                        "provider": default_provider,
+                        "cost_basis": "estimate from configured published rates; verify with your provider"},
         "managed_credit": {"available_gbp": 0.0, "offered": False,
                            "note": "ResearchAgentLab Credits are not available yet; "
-                                   "runs use your own API key."},
+                                   "Simple Mode uses credentials saved to your account."},
         "recent_runs": quota.history(user, limit=20),
     }
 
@@ -680,6 +767,7 @@ async def environment():
         "anthropic_key_set": bool(config.ANTHROPIC_API_KEY),
         "openai_key_set": bool(config.OPENAI_API_KEY),
         "gemini_key_set": bool(config.GEMINI_API_KEY),
+        "groq_key_set": bool(config.GROQ_API_KEY),
         "api_provider": config.API_PROVIDER,
         "api_model": config.API_MODEL_DEFAULT,
         "ollama_host": config.OLLAMA_HOST,
@@ -1476,10 +1564,15 @@ async def generate_report(session_id: str, request: Request):
         report = {k: v for k, v in study_report["content"].items() if k != "results_hash"}
         return {"report": report, "mode": "study"}
 
-    use_api, model_provider = _session_inference_settings(session)
+    owner_id = db.session_owner(session_id) or ""
+    use_api, model_provider = _session_inference_settings(session, owner_id)
+    model_name = _account_inference_defaults(owner_id)[2]
+    if owner_id:
+        from memory import model_preferences
+        model_name = model_preferences.api_model(owner_id, model_provider)
     api_model = APIModel(session_id=session_id,
-                         user_id=db.session_owner(session_id) or "",
-                         provider=model_provider, enabled=use_api)
+                         user_id=owner_id, provider=model_provider,
+                         model=model_name, enabled=use_api)
 
     # Hosted deployments never probe for a local binary or model file.
     local_model = None
@@ -1521,11 +1614,17 @@ async def report_backend_status(request: Request, session_id: str = ""):
     if session_id:
         _authorise_session(session_id, request)
         session = NoteDB().get_session(session_id)
-    enabled, provider = _session_inference_settings(session)
-    route = _effective_inference_route(request, enabled, provider)
+    user = _current_user(request)
+    user_id = user.user_id if user else ""
+    enabled, provider = _session_inference_settings(session, user_id)
+    model = _account_inference_defaults(user_id)[2]
+    if user_id:
+        from memory import model_preferences
+        model = model_preferences.api_model(user_id, provider)
+    route = _effective_inference_route(request, enabled, provider, model)
     effective_provider = route["effective_provider"]
     api_ready = False
-    if enabled and route["inference_mode"] == "byok":
+    if enabled and route["inference_mode"] in {"byok", "simple_byok"}:
         api_ready = True
     elif enabled and effective_provider:
         try:
@@ -1604,8 +1703,6 @@ async def download_pdf(session_id: str):
 
 @app.post("/api/sessions", status_code=201)
 async def create_session(req: NewSessionRequest, request: Request):
-    from tools import app_settings
-
     topic = req.topic.strip()
     if not topic:
         raise HTTPException(status_code=400, detail="Topic cannot be empty.")
@@ -1616,14 +1713,16 @@ async def create_session(req: NewSessionRequest, request: Request):
 
     db = NoteDB()
     owner = _require_user(request)
+    use_api, model_provider, model_name = _account_inference_defaults(
+        owner.user_id if owner else "")
     project_id = (getattr(req, "project_id", "") or "").strip()
     if project_id:
         _authorise_project(project_id, request)
     session_id = db.create_session(
         topic, background=background, goals=goals, constraints=constraints,
         owner_id=owner.user_id if owner else "", project_id=project_id,
-        model_api_enabled=_settings["use_api"],
-        model_provider=app_settings.api_provider(),
+        model_api_enabled=use_api,
+        model_provider=model_provider,
     )
 
     # Someone starting in the middle — their own papers, their own question —
@@ -1640,8 +1739,9 @@ async def create_session(req: NewSessionRequest, request: Request):
         background=background,
         goals=goals,
         constraints=constraints,
-        use_api=_settings["use_api"],
-        model_provider=app_settings.api_provider(),
+        use_api=use_api,
+        model_provider=model_provider,
+        model_name=model_name,
     )
     runner.run_id = run_id
     _runners[session_id] = runner
@@ -1700,7 +1800,12 @@ async def resume_session(session_id: str, request: Request):
         return {"session_id": session_id, "status": "already_running"}
 
     # Restore detail fields from DB so the runner uses them
-    use_api, model_provider = _session_inference_settings(session)
+    owner_id = db.session_owner(session_id) or ""
+    use_api, model_provider = _session_inference_settings(session, owner_id)
+    model_name = _account_inference_defaults(owner_id)[2]
+    if owner_id:
+        from memory import model_preferences
+        model_name = model_preferences.api_model(owner_id, model_provider)
     runner = SessionRunner(
         session_id=session_id,
         background=session.get("background") or "",
@@ -1708,6 +1813,7 @@ async def resume_session(session_id: str, request: Request):
         constraints=session.get("constraints") or "",
         use_api=use_api,
         model_provider=model_provider,
+        model_name=model_name,
     )
     _runners[session_id] = runner
     runner.start()
@@ -1754,7 +1860,12 @@ def _start_runner(session_id: str, db: NoteDB, only: str | None = None) -> bool:
     if existing and existing.is_alive():
         return False
     session = db.get_session(session_id)
-    use_api, model_provider = _session_inference_settings(session)
+    owner_id = db.session_owner(session_id) or ""
+    use_api, model_provider = _session_inference_settings(session, owner_id)
+    model_name = _account_inference_defaults(owner_id)[2]
+    if owner_id:
+        from memory import model_preferences
+        model_name = model_preferences.api_model(owner_id, model_provider)
     runner = SessionRunner(
         session_id=session_id,
         background=session.get("background") or "",
@@ -1762,6 +1873,7 @@ def _start_runner(session_id: str, db: NoteDB, only: str | None = None) -> bool:
         constraints=session.get("constraints") or "",
         use_api=use_api,
         model_provider=model_provider,
+        model_name=model_name,
         only=only,
     )
     _runners[session_id] = runner

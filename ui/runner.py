@@ -163,6 +163,7 @@ class SessionRunner:
         constraints: Optional[str] = None,
         use_api: bool = True,
         model_provider: Optional[str] = None,
+        model_name: Optional[str] = None,
         only: Optional[str] = None,   # run this one stage (agents/stages.py) and stop
     ) -> None:
         self.session_id = session_id
@@ -175,6 +176,7 @@ class SessionRunner:
         self.constraints = constraints or ""
         self.use_api = use_api
         self.model_provider = (model_provider or "").strip().lower() or None
+        self.model_name = (model_name or "").strip() or None
         self._q: queue.Queue = queue.Queue()
         self._question_event = threading.Event()
         self._question_choice: Optional[Any] = None
@@ -249,15 +251,19 @@ class SessionRunner:
             except Exception:
                 pass
 
-    def configure_model_api(self, enabled: bool, provider: str | None = None) -> None:
+    def configure_model_api(self, enabled: bool, provider: str | None = None,
+                            model: str | None = None) -> None:
         """Apply a session setting to this live runner before its next model call."""
         self.use_api = bool(enabled)
         if provider:
             self.model_provider = provider.strip().lower()
+        if model is not None:
+            self.model_name = model.strip() or None
         if self._api_model is not None:
             self._api_model.configure(
                 enabled=self.use_api,
                 provider=self.model_provider,
+                model=self.model_name,
             )
 
     def emit(self, event_type: str, data: Any = None) -> None:
@@ -452,7 +458,8 @@ class SessionRunner:
         owner_id = note_db.session_owner(self.session_id) or ""
         api_model = APIModel(cost_tracker=cost_tracker, on_budget_stop=_budget_stop,
                              session_id=self.session_id, user_id=owner_id,
-                             provider=self.model_provider, enabled=self.use_api)
+                             provider=self.model_provider, model=self.model_name,
+                             enabled=self.use_api)
         self._api_model = api_model
 
         self._configure_local_fallback(api_model)

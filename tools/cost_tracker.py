@@ -185,6 +185,30 @@ class CostTracker:
                 """, (session_id, safe_limit)).fetchall()
         return [dict(row) for row in rows]
 
+    def user_routes(self, user_id: str, limit: int = 50) -> list[dict]:
+        """Recent routing provenance across only one account's sessions."""
+        if not user_id:
+            return []
+        safe_limit = min(max(int(limit), 1), 200)
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'research_sessions'"
+            ).fetchone() is None:
+                return []
+            rows = conn.execute(
+                """
+                SELECT u.timestamp, u.task_type, u.provider, u.selected_model,
+                       u.actual_provider, u.actual_model, u.routing_policy,
+                       u.fallback_attempts, u.fallback_trail, u.retry_count,
+                       u.input_tokens, u.output_tokens, u.cost_usd, u.cost_known
+                FROM api_usage_log AS u
+                JOIN research_sessions AS s ON s.session_id = u.session_id
+                WHERE s.owner_id = ?
+                ORDER BY u.id DESC LIMIT ?
+                """, (user_id, safe_limit)).fetchall()
+        return [dict(row) for row in rows]
+
     def spend_since(self, since_timestamp: str) -> float:
         """USD spent since an ISO timestamp."""
         with self._connect() as conn:
@@ -205,6 +229,57 @@ class CostTracker:
         # comparing against local midnight would drop or double-count the
         # rows written within the machine's offset from UTC.
         return self.spend_since(datetime.utcnow().strftime("%Y-%m-%dT00:00:00"))
+
+    def today_usage_details(self, user_id: str = "") -> dict:
+        """Return an honest breakdown of today's recorded model usage.
+
+        ``cost_usd`` is an estimate from configured published rates, not a
+        provider invoice.  Rows whose provider did not expose a trustworthy
+        price remain separate instead of being presented as free.
+        """
+        since = datetime.utcnow().strftime("%Y-%m-%dT00:00:00")
+        owner_filter = ""
+        params: list[str] = [since]
+        if user_id:
+            owner_filter = (
+                " AND session_id IN (SELECT session_id FROM research_sessions WHERE owner_id = ?)"
+            )
+            params.append(user_id)
+        with self._connect() as conn:
+            if user_id and conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'research_sessions'"
+            ).fetchone() is None:
+                return {
+                    "calls": 0, "input_tokens": 0, "output_tokens": 0,
+                    "estimated_cost_usd": 0.0, "estimated_calls": 0,
+                    "verified_zero_calls": 0, "unknown_cost_calls": 0,
+                }
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS calls,
+                       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                       COALESCE(SUM(CASE WHEN cost_known = 1 THEN cost_usd ELSE 0 END), 0)
+                           AS estimated_cost,
+                       COALESCE(SUM(CASE WHEN cost_known = 1 AND cost_usd > 0 THEN 1 ELSE 0 END), 0)
+                           AS estimated_calls,
+                       COALESCE(SUM(CASE WHEN cost_known = 1 AND cost_usd = 0 THEN 1 ELSE 0 END), 0)
+                           AS verified_zero_calls,
+                       COALESCE(SUM(CASE WHEN cost_known = 0 THEN 1 ELSE 0 END), 0)
+                           AS unknown_cost_calls
+                FROM api_usage_log WHERE timestamp >= ?{owner_filter}
+                """,
+                params,
+            ).fetchone()
+        return {
+            "calls": int(row[0] or 0),
+            "input_tokens": int(row[1] or 0),
+            "output_tokens": int(row[2] or 0),
+            "estimated_cost_usd": float(row[3] or 0.0),
+            "estimated_calls": int(row[4] or 0),
+            "verified_zero_calls": int(row[5] or 0),
+            "unknown_cost_calls": int(row[6] or 0),
+        }
 
     def session_summary(self, since_timestamp: Optional[str] = None) -> dict:
         """

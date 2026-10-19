@@ -349,6 +349,10 @@ def test_settings_html_separates_simple_keys_and_advanced_gateway(client):
     assert 'id="backup-panel"' in html
     assert '!(d.hosted && p.configurable_url)' in html
     assert 'urlField.hidden = !current.configurable_url || !!d.hosted' in html
+    assert '<title>ResearchAgentLab</title>' in html
+    assert html.count('ResearchAgentLab') >= 3
+    assert 'class="project-filter-wrap"' in html
+    assert 'aria-label="Filter sessions by project"' in html
     assert "value = provider.base_url" in html
     assert "gateway-token-input').value =" not in html
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AI Research Agent</title>
+<title>ResearchAgentLab</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
@@ -88,8 +88,23 @@ input:focus, textarea:focus { border-color: var(--accent); }
   font-weight: 700;
   font-size: 16px;
   color: var(--text-0);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .nav-logo svg { color: var(--accent-2); }
+.brand-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 24px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
 .nav-spacer { flex: 1; }
 
 /* ── App views: research / dashboard / manage / settings ─────────────────── */
@@ -266,6 +281,36 @@ input:focus, textarea:focus { border-color: var(--accent); }
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.project-filter-wrap {
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid var(--border);
+}
+#project-filter {
+  width: 100%;
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--bg-2);
+  background-image: linear-gradient(45deg, transparent 50%, var(--accent-2) 50%),
+                    linear-gradient(135deg, var(--accent-2) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  padding: 9px 34px 9px 11px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+#project-filter:hover { background-color: var(--accent-bg); }
+#project-filter:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 #session-list {
   flex: 1;
@@ -1489,10 +1534,8 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
 <div id="login-screen">
   <form class="login-box" onsubmit="submitLogin(event)">
     <h1>
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
-      </svg>
-      AI Research Agent
+      <span class="brand-mark" aria-hidden="true">R</span>
+      ResearchAgentLab
     </h1>
     <p data-i18n="login.intro">This server asks for an access token.</p>
     <div class="field" style="max-width:none;margin:0">
@@ -1537,10 +1580,8 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
   <!-- Navbar -->
   <nav id="navbar">
     <div class="nav-logo">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
-      </svg>
-      AI Research Agent
+      <span class="brand-mark" aria-hidden="true">R</span>
+      ResearchAgentLab
     </div>
     <div class="nav-tabs">
       <button class="nav-tab active" id="tab-research" onclick="showView('research')" data-i18n="nav.research">Research</button>
@@ -1578,8 +1619,8 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
         <span data-i18n="app.sessions">Sessions</span>
         <button class="btn-secondary btn-sm" onclick="loadSessions()" title="Refresh">↻</button>
       </div>
-      <div style="padding:0 12px 10px">
-        <select id="project-filter" onchange="renderSessionList()" style="width:100%">
+      <div class="project-filter-wrap">
+        <select id="project-filter" onchange="renderSessionList()" aria-label="Filter sessions by project">
           <option value="" data-i18n="projects.all">All projects</option>
         </select>
       </div>
@@ -1596,7 +1637,7 @@ details.study-details summary { cursor: pointer; color: var(--text-1); font-size
         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
         </svg>
-        <h2>AI Research Agent</h2>
+        <h2>ResearchAgentLab</h2>
         <p data-i18n="app.emptyLede"></p>
         <button class="btn-primary" onclick="openNewSessionModal()" data-i18n="app.startSession">Start New Research Session</button>
       </div>

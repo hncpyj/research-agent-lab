@@ -1,5 +1,5 @@
 """
-FastAPI web application for the AI Research Agent.
+FastAPI web application for ResearchAgentLab.
 
 Endpoints:
   GET  /                              → serve SPA
@@ -39,7 +39,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AI Research Agent", version="1.0.0")
+app = FastAPI(title="ResearchAgentLab", version="1.0.0")
 
 # Behind a domain, answer only to that domain: a request that arrives with
 # somebody else's Host header is either a misconfigured proxy or someone

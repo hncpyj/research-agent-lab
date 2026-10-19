@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f7f8fc"/>
+  <circle cx="1040" cy="40" r="360" fill="#0aaa90" opacity=".09"/>
+  <rect x="90" y="88" width="58" height="58" rx="12" fill="#0aaa90"/>
+  <text x="119" y="130" text-anchor="middle" font-family="monospace" font-size="30" font-weight="700" fill="#fff">R</text>
+  <text x="170" y="127" font-family="Arial, sans-serif" font-size="31" font-weight="600" fill="#0f1117">ResearchAgentLab</text>
+  <text x="90" y="288" font-family="Georgia, serif" font-size="72" fill="#0f1117">Protocol before code.</text>
+  <text x="90" y="365" font-family="Georgia, serif" font-size="72" fill="#0aaa90">Evidence before claims.</text>
+  <text x="93" y="445" font-family="Arial, sans-serif" font-size="26" fill="#6b7280">Stress-testing control boundaries in autonomous research agents.</text>
+  <text x="93" y="535" font-family="monospace" font-size="20" fill="#0aaa90">SOURCE AVAILABLE · LOCAL FIRST</text>
+</svg>

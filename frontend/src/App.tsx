@@ -6,8 +6,13 @@ import OpenSource from './pages/public/OpenSource';
 import Pricing from './pages/public/Pricing';
 import Privacy from './pages/public/Privacy';
 import Terms from './pages/public/Terms';
-import HostedAppRedirect from './pages/auth/HostedAppRedirect';
-import Login from './pages/auth/Login';
+import AccountFlow from './pages/auth/AccountFlow';
+import { AuthProvider, ProtectedRoute } from './auth/AuthProvider';
+import AppShell from './components/AppShell';
+import Projects, { ProjectView } from './pages/app/Projects';
+import Library from './pages/app/Library';
+import { Account, Billing, Privacy as DataPrivacy, Usage } from './pages/app/AccountPages';
+import ModelSettings, {LocalRunner} from './pages/app/ModelSettings';
 import Dashboard from './pages/app/Dashboard';
 import NewSession from './pages/app/NewSession';
 import ResearchSession from './pages/app/ResearchSession';
@@ -15,6 +20,7 @@ import ResearchSession from './pages/app/ResearchSession';
 export default function App() {
   return (
     <BrowserRouter>
+      <AuthProvider>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/features" element={<Features />} />
@@ -25,19 +31,30 @@ export default function App() {
         <Route path="/pricing" element={<Navigate to="/availability" replace />} />
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/terms" element={<Terms />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<HostedAppRedirect path="/signup" />} />
-        <Route path="/verify-email" element={<HostedAppRedirect path="/verify-email" />} />
-        <Route path="/forgot-password" element={<HostedAppRedirect path="/forgot-password" />} />
-        <Route path="/reset-password" element={<HostedAppRedirect path="/reset-password" />} />
-        <Route path="/app" element={<Dashboard />} />
-        <Route path="/app/sessions/new" element={<NewSession />} />
-        <Route path="/app/sessions/:sessionId" element={<ResearchSession />} />
-        <Route path="/app/projects/:projectId/sessions/new" element={<NewSession />} />
-        <Route path="/app/projects/:projectId/sessions/:sessionId" element={<ResearchSession />} />
-        <Route path="/app/*" element={<HostedAppRedirect path="/app" />} />
+        {['login', 'signup', 'verify-email', 'forgot-password', 'reset-password'].map(path =>
+          <Route key={path} path={`/${path}`} element={<AccountFlow key={path} />} />)}
+        <Route element={<ProtectedRoute />}>
+          <Route path="/app" element={<AppShell />}>
+            <Route index element={<Dashboard />} />
+            <Route path="sessions/new" element={<NewSession />} />
+            <Route path="sessions/:sessionId" element={<ResearchSession />} />
+            <Route path="projects" element={<Projects />} />
+            <Route path="projects/:projectId" element={<ProjectView />} />
+            <Route path="projects/:projectId/sessions/new" element={<NewSession />} />
+            <Route path="projects/:projectId/sessions/:sessionId" element={<ResearchSession />} />
+            <Route path="library" element={<Library />} />
+            <Route path="usage" element={<Usage />} />
+            <Route path="settings/account" element={<Account />} />
+            <Route path="settings/api" element={<ModelSettings />} />
+            <Route path="settings/local-runner" element={<LocalRunner />} />
+            <Route path="settings/billing" element={<Billing />} />
+            <Route path="settings/privacy" element={<DataPrivacy />} />
+            <Route path="*" element={<Navigate to="/app" replace />} />
+          </Route>
+        </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

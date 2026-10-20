@@ -18,5 +18,20 @@ on one origin. Do not set `VITE_API_BASE_URL` for this same-origin setup.
 Set `PUBLIC_SCHEME=https` behind a TLS ingress, and configure backend trusted
 proxy addresses so authentication cookies receive the Secure flag.
 
-React migration is incomplete; some routes still use `VITE_APP_URL` to open the
-legacy application. Configure that address explicitly if using those routes.
+All application routes now stay in React. Authentication, projects, session
+controls and approval gates, model credentials/settings, local models, reports,
+usage and backups call FastAPI. Existing Python HTML is retained for compatibility
+but is not used by React. Public account links also stay on the current origin.
+
+`npm run build` includes TypeScript checking. `npm test` runs browser workflow
+tests against mocked API responses (Chrome by default; set `PLAYWRIGHT_CHANNEL`
+to another installed Playwright-supported channel). `TEST_PREVIEW=1 npm test`
+checks the production build after `npm run build`.
+
+Tests do not invoke real model APIs or send email. Backend regression tests
+validate database ownership and approval logic separately. Real email delivery,
+model availability and deployment ingress must be configured for the target host.
+
+For full application deployment use the Nginx Dockerfile. The optional Vercel
+configuration only serves static files; API/WebSocket routing requires an
+additional gateway and is not configured by that file.

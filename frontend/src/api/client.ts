@@ -1,4 +1,5 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+export const apiUrl = (path: string) => `${API_BASE}${path}`;
 
 export class ApiError extends Error {
   status: number;
@@ -14,7 +15,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
       ...(init?.headers || {}),
     },
   });
@@ -25,12 +26,34 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     : await response.text();
 
   if (!response.ok) {
+    if (response.status === 401 && !path.startsWith('/api/auth/') && path !== '/api/login') {
+      window.dispatchEvent(new Event('auth-expired'));
+    }
     const message = typeof body === 'object' && body?.detail
-      ? String(body.detail)
+      ? (typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail))
       : `Request failed (${response.status})`;
     throw new ApiError(message, response.status);
   }
+  if (!contentType.includes('application/json') && response.status !== 204) {
+    throw new ApiError('API returned a page instead of JSON. Check the backend connection.', 502);
+  }
   return body as T;
+}
+
+export const send = <T = Record<string, unknown>>(path: string, body: unknown = {}, method = 'POST') =>
+  api<T>(path, { method, body: JSON.stringify(body) });
+
+export async function download(path: string, fallback: string) {
+  const response = await fetch(apiUrl(path), { credentials: 'include' });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new ApiError(body.detail || `Download failed (${response.status})`, response.status);
+  }
+  const name = response.headers.get('content-disposition')?.match(/filename="?([^";]+)"?/)?.[1] || fallback;
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url; link.download = name; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export type SessionSummary = {
@@ -52,6 +75,9 @@ export type SessionDetail = {
   waiting_step: string | null;
   interrupted: Record<string, unknown> | null;
   cost_usd: number;
+  gap_report: string | null;
+  artifacts: Record<string, { version: number; status: string; approved: boolean; content: Record<string, unknown> }>;
+  code_files: Array<{file_path: string; content: string}>;
 };
 
 export async function listSessions() {
@@ -68,11 +94,13 @@ export async function login(email: string, password: string) {
 }
 
 export async function logout() {
-  return api<{ status: string }>('/api/auth/logout', { method: 'POST' });
+  await api('/api/auth/logout', { method: 'POST' });
+  return api('/api/logout', { method: 'POST' });
 }
 
+export type AuthState = { accounts: boolean; user: AuthUser | null; signup_open: boolean; email_configured: boolean; password_policy: {min_length: number; max_length: number} };
 export async function currentUser() {
-  return api<{ accounts: boolean; user: AuthUser | null }>('/api/auth/me');
+  return api<AuthState>('/api/auth/me');
 }
 
 export async function getSession(sessionId: string) {
@@ -112,7 +140,7 @@ export async function resumeSession(sessionId: string) {
 }
 
 export function sessionSocketUrl(sessionId: string) {
-  const base = API_BASE || window.location.origin;
+  const base = new URL(API_BASE || '/', window.location.origin).href;
   const url = new URL(`/ws/${encodeURIComponent(sessionId)}`, base);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();

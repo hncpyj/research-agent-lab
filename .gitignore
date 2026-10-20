@@ -82,7 +82,7 @@ paper/
 /confirmatory_runs/
 
 # AI/design-tool source briefs may contain unpublished product strategy.
-/web/src/imports/pasted_text/
+/frontend/src/imports/pasted_text/
 
 # Node packages for the public site (web/)
 node_modules/
@@ -95,8 +95,8 @@ node_modules/
 # Local release bundles and design-reference copies
 /research_logs.zip
 /revision_evidence.zip
-/web/Research Agent Lab webpage original/
-/web/web.png
+/frontend/Research Agent Lab webpage original/
+/frontend/web.png
 
 # Research records: keep the evidence, not the scratch workspaces
 research_logs/**/attempt_*/
